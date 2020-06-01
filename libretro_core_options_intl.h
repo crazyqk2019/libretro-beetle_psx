@@ -630,7 +630,7 @@ struct retro_core_option_definition option_defs_chs[] = {
       "渲染器（须要重启）",
       "选择视频渲染器\n"
       "软件渲染器最精确，但是随着内部GPU分辨率提高，对机器性能的要求增长非常快。\n"
-      "硬件渲染器精度略低，但是在内部分辨率提高时能够提供更佳的性能，并且可以实现各种图像增强特效。\n"
+      "硬件渲染器精度略低，但是在高分辨率下能够提供更佳的性能，并且可以实现各种特效。\n"
       "'硬件（自动）'根据当前libretro前端的视频驱动自动选择Vulkan或者OpenGL渲染器，\n"
       "如果当前视频驱动不是Vulkan或者OpenGL 3.3兼容驱动，则自动使用软件渲染器。",
       {
@@ -699,7 +699,7 @@ struct retro_core_option_definition option_defs_chs[] = {
       "抖动模式",
       "设置抖动模式。\n"
       "'1x（原始）'模拟原始硬件的低分辨率抖动，平滑原始色深下的色块效果。\n"
-      "'内部分辨率'放大抖动粒度到设置的内部分辨率以达到更好的效果。\n""
+      "'内部分辨率'放大抖动粒度到设置的内部分辨率以达到更好的效果。\n"
       "设为32位色深时，建议禁用此项。\n"
       "注意：在Vulkan模式下，启用此项会强制降低为原始色深，而禁用时会自动启用高色深输出。",
       {
@@ -717,8 +717,8 @@ struct retro_core_option_definition option_defs_chs[] = {
       "选择纹理过滤算法。\n"
       "'最临近'模拟原始硬件。\n"
       "'双线性' 和 '3点取样'是平滑滤镜，通过模糊效果平滑像素边缘。\n"
-      "'SABR', 'xBR', 和 'JINC2'是放大滤镜，可以提高纹理精度/锐度，但是需要更高的机器性能。\n"
-      "只支持硬件渲染器。",
+      "'SABR', 'xBR', 和 'JINC2'是放大滤镜，可以提高纹理精度/锐度，\n"
+      "但是需要更高的机器性能。只支持硬件渲染器。",
       {
          { "nearest",  "最临近" },
          { "SABR",     NULL },
@@ -822,7 +822,8 @@ struct retro_core_option_definition option_defs_chs[] = {
       "PGXP操作模式",
       "允许以子像素精度渲染3D对象，最小化原始硬件上由于使用整数顶点坐标而产生的3D对象的变形和抖动。\n"
       "'仅内存'模式兼容性问题最小，建议通常情况下使用。\n"
-      "'内存 + CPU（有Bug）'模式可以进一步减少抖动，但是对机器的性能要求更高，并且可能产生各种几何错误。",
+      "'内存+CPU（有Bug）'模式可以进一步减少抖动，\n"
+      "但是对机器的性能要求更高，并且可能产生各种几何错误。",
       {
          { "disabled",     NULL },
          { "memory only",  "仅内存" },
@@ -850,7 +851,8 @@ struct retro_core_option_definition option_defs_chs[] = {
    {
       BEETLE_OPT(pgxp_texture),
       "PGXP纹理透视校正",
-      "用透视校正纹理映射替换PSX原始的仿射纹理映射，消除位置相关的纹理变形和扭曲，产生正确对齐的纹理。\n"
+      "用透视校正纹理映射替换PSX原始的仿射纹理映射，\n"
+      "消除位置相关的纹理变形和扭曲，产生正确对齐的纹理。\n"
       "此项只在PGXP操作模式启用时有效。只支持硬件渲染器。",
       {
          { "disabled", NULL },
@@ -876,10 +878,9 @@ struct retro_core_option_definition option_defs_chs[] = {
       BEETLE_OPT(line_render),
       "Line-to-Quad修正",
       "选择line-to-quad修正模式。\n"
-      "有些游戏（例如 Doom, Hexen, Soul Blade 等）通过在屏幕上拉长单像素高度的三角形的方式来绘制水平线条，\n"
+      "有些游戏（例如 Doom, Hexen, Soul Blade等）通过在屏幕上拉长单像素高度的三角形的方式来绘制水平线条，\n"
       "在原始硬件上这些三角形会光栅化为单排像素。\n"
-      "此修正检测这些小的三角形并根据需要转换成四边形，\n"
-      "以使它们在使用硬件渲染器和高内部分辨率时能正确显示。\n"
+      "此修正检测这些小的三角形并根据需要转换成四边形，以使它们在使用硬件渲染器和高内部分辨率时能正确显示。\n"
       "'激进'模式对有些游戏是必须的（例如 Dark Forces, Duke Nukem），但是对其他游戏可能产生图像问题。\n"
       "如果不确信如何选择，保持'缺省'模式。",
       {
@@ -909,17 +910,17 @@ struct retro_core_option_definition option_defs_chs[] = {
       "动态重编译CPU指令为本机指令。\n"
       "比解释器快很多，但是CPU时序精度较低，并且可能有bug。",
       {
-         { "disabled", "Disabled (Beetle Interpreter)" },
-         { "execute",  "Max Performance" },
-         { "execute_one",  "Cycle Timing Check" },
-         { "run_interpreter", "Lightrec Interpreter" },
+         { "disabled", "禁用（Beetle解释器）" },
+         { "execute",  "最高性能" },
+         { "execute_one",  "周期时序检测" },
+         { "run_interpreter", "轻量重编译解释器" },
          { NULL, NULL },
       },
       "disabled"
    },
    {
       BEETLE_OPT(dynarec_invalidate),
-      "动态重编译代码失效",
+      "动态重编译代码失效方式",
       "有些游戏需要完全失效，有些需要仅DMA。",
       {
          { "full", "完全" },
@@ -1165,7 +1166,9 @@ struct retro_core_option_definition option_defs_chs[] = {
    {
       BEETLE_OPT(image_offset),
       "剪切图像偏移量",
-      "当'剪切水平过扫描'启用时， allows the resultant cropped image to be offset horizontally to the right (positive) or left (negative) by the specified number of pixels. May be used to correct alignment issues. Only supported by the software renderer.",
+      "当'剪切水平过扫描'启用时，对剪切后的图像进行指定像素单位的水平位移，向右（正值）或者向左（负值），\n"
+      "可以用来解决对齐问题。\n"
+      "只支持软件渲染器。",
       {
          { "-12px",    NULL },
          { "-11px",    NULL },
@@ -1199,8 +1202,10 @@ struct retro_core_option_definition option_defs_chs[] = {
 #if defined(HAVE_OPENGL) || defined(HAVE_OPENGLES) || defined(HAVE_VULKAN)
    {
       BEETLE_OPT(image_offset_cycles),
-      "Horizontal Image Offset (GPU Cycles)",
-      "Specify number of GPU cycles to offset image by. Positive values move image to the right, negative values move image to the left. Only supported by the hardware renderers.",
+      "水平图像偏移（GPU周期）",
+      "指定以GPU时钟周期为单位的图像偏移量。\n"
+      "正值向右偏移，负值向左偏移。\n"
+      "只支持硬件渲染器。",
       {
          { "-40",      NULL },
          { "-39",      NULL },
@@ -1290,8 +1295,10 @@ struct retro_core_option_definition option_defs_chs[] = {
 #endif
    {
       BEETLE_OPT(initial_scanline),
-      "Initial Scanline - NTSC",
-      "Select the first displayed scanline when running NTSC content. Setting a value greater than zero will reduce the height of output images by cropping pixels from the topmost edge. May be used to counteract letterboxing.",
+      "起始扫描线 - NTSC",
+      "选择运行NTSC制游戏时第一条显示的扫描线。\n"
+      "设置大于0的值会剪切掉顶部的像素从而减小输出图像的高度。\n"
+      "可用来抵消边框效果。",
       {
          { "0",  NULL },
          { "1",  NULL },
@@ -1340,8 +1347,10 @@ struct retro_core_option_definition option_defs_chs[] = {
    },
    {
       BEETLE_OPT(last_scanline),
-      "Last Scanline - NTSC",
-      "Select the last displayed scanline when running NTSC content. Setting a value less than 239 will reduce the height of output images by cropping pixels from the bottommost edge. May be used to counteract letterboxing.",
+      "结束扫描线 - NTSC",
+      "选择运行NTSC制游戏时最后一条显示的扫描线。\n"
+      "设置小于239的值会剪切掉底部的像素从而减小输出图像的高度。\n"
+      "可用来抵消边框效果。",
       {
          { "210", NULL },
          { "211", NULL },
@@ -1379,8 +1388,10 @@ struct retro_core_option_definition option_defs_chs[] = {
    },
    {
       BEETLE_OPT(initial_scanline_pal),
-      "Initial Scanline - PAL",
-      "Select the first displayed scanline when running PAL content. Setting a value greater than zero will reduce the height of output images by cropping pixels from the topmost edge. May be used to counteract letterboxing.",
+      "起始扫描线 - PAL",
+      "选择运行PAL制游戏时第一条显示的扫描线。\n"
+      "设置大于0的值会剪切掉顶部的像素从而减小输出图像的高度。\n"
+      "可用来抵消边框效果。",
       {
          { "0",  NULL },
          { "1",  NULL },
@@ -1429,8 +1440,10 @@ struct retro_core_option_definition option_defs_chs[] = {
    },
    {
       BEETLE_OPT(last_scanline_pal),
-      "Last Scanline - PAL",
-      "Select the last displayed scanline when running PAL content. Setting a value less than 287 will reduce the height of output images by cropping pixels from the bottommost edge. May be used to counteract letterboxing.",
+      "结束扫描线 - PAL",
+      "选择运行PAL制游戏时最后一条显示的扫描线。\n"
+      "设置小于287的值会剪切掉底部的像素从而减小输出图像的高度。\n"
+      "可用来抵消边框效果。",
       {
          { "230", NULL },
          { "231", NULL },
@@ -1497,12 +1510,15 @@ struct retro_core_option_definition option_defs_chs[] = {
 #ifndef EMSCRIPTEN
    {
       BEETLE_OPT(cd_access_method),
-      "CD Access Method (Restart)",
-      "Select method used to read data from content disk images. 'Synchronous' mimics original hardware. 'Asynchronous' can reduce stuttering on devices with slow storage. 'Pre-Cache' loads the entire disk image into memory when launching content which may improve in-game loading times at the cost of an initial delay at startup. 'Pre-Cache' may cause issues on systems with low RAM.",
+      "CD访问方式（须重启）",
+      "选择从游戏光盘镜像读取数据的方式。\n"
+      "'同步'模拟原始硬件。'异步'可以减少慢速存储设备的卡顿。\n"
+      "'预缓存'在游戏启动时读取整个光盘镜像到内存，可以提高游戏中的加载速度，\n"
+      "但是会增加启动时的延迟，并且在低内存系统上可能会产生问题。",
       {
-         { "sync",     "Synchronous" },
-         { "async",    "Asynchronous" },
-         { "precache", "Pre-Cache" },
+         { "sync",     "同步" },
+         { "async",    "异步" },
+         { "precache", "预缓存" },
          { NULL, NULL },
       },
       "sync"
@@ -1510,10 +1526,12 @@ struct retro_core_option_definition option_defs_chs[] = {
 #endif
    {
       BEETLE_OPT(cd_fastload),
-      "CD Loading Speed",
-      "Select disk access speed multiplier. Setting this higher than '2x (Native)' can greatly reduce in-game loading times, but may introduce timing errors. Some games may not function properly if this option is increased above a certain value.",
+      "CD载入速度",
+      "选择光驱倍速。\n"
+      "设置大于'2x（原始）'可以极大的缩短游戏载入时间，但是可能导致时序错误。\n"
+      "有些游戏在大于一定值时可能无法正常工作。",
       {
-         { "2x(native)", "2x (Native)" },
+         { "2x(native)", "2x（原始）" },
          { "4x",          NULL },
          { "6x",          NULL },
          { "8x",          NULL },
@@ -1526,8 +1544,10 @@ struct retro_core_option_definition option_defs_chs[] = {
    },
    {
       BEETLE_OPT(use_mednafen_memcard0_method),
-      "Memory Card 0 Method (Restart)",
-      "Choose the save data format used for memory card 0. 'Mednafen' may be used for compatibility with the stand-alone version of Mednafen. When used with Beetle PSX, Libretro (.srm) and Mednafen (.mcr) saves have internally identical formats and can be converted between one another via renaming.",
+      "记忆卡0格式（须重启）",
+      "选择记忆卡0的数据格式。\n"
+      "'Mednafen'可用于保持与独立版本Mednafen的兼容性。\n"
+      "用于Beetle PSX内核时，Libretro (.srm) 和 Mednafen (.mcr) 格式内部是相同的，可以通过重命名直接转换。",
       {
          { "libretro", "Libretro" },
          { "mednafen", "Mednafen" },
@@ -1537,8 +1557,11 @@ struct retro_core_option_definition option_defs_chs[] = {
    },
    {
       BEETLE_OPT(enable_memcard1),
-      "Enable Memory Card 1 (Restart)",
-      "Select whether to emulate a second memory card in slot 1. When disabled, games can only access the memory card in slot 0. Note: Some games require this option to be disabled for correct operation (e.g. Codename Tenka). Note: Memory Card 1 uses the Mednafen (.mcr) save format.",
+      "启用记忆卡1（须重启）",
+      "选择是否模拟插槽1中的第二块记忆卡。\n"
+      "如果禁用，游戏只能访问插槽0中的第一块记忆卡。\n"
+      "注意：有些游戏须要禁用此项才能正确运行（例如 Codename Tenka）。\n"
+      "记忆卡1使用Mednafen (.mcr) 保存格式。",
       {
          { "enabled",  NULL },
          { "disabled", NULL },
@@ -1548,8 +1571,9 @@ struct retro_core_option_definition option_defs_chs[] = {
    },
    {
       BEETLE_OPT(shared_memory_cards),
-      "Shared Memory Cards (Restart)",
-      "When enabled, all games will save to and load from the same memory card files. When disabled, separate memory card files will be generated for each item of loaded content. Note: 'Memory Card 0 Method' must be set to 'Mednafen' for shared memory cards to take effect.",
+      "共享记忆卡（须重启）",
+      "如果启用，所有游戏共享同一个记忆卡文件。如果禁用，每个游戏使用单独的记忆卡文件。\n"
+      "注意：'记忆卡0格式'必须设为'Mednafen'才能使用共享记忆卡。",
       {
          { "disabled", NULL },
          { "enabled",  NULL },
@@ -1559,8 +1583,12 @@ struct retro_core_option_definition option_defs_chs[] = {
    },
    {
       BEETLE_OPT(analog_calibration),
-      "Analog Self-Calibration",
-      "When the input device is set to DualShock, Analog Controller, Analog Joystick, or neGcon, this option allows dynamic calibration of analog inputs. Maximum registered input values are monitored in real time and used to scale analog coordinates passed to the emulator. This should be used for games such as Mega Man Legends 2 that expect larger values than what modern controllers provide. For best results, analog sticks should be rotated at full extent to tune the calibration algorithm each time content is loaded.",
+      "模拟摇杆自校正",
+      "当输入设备设为双震动手柄、模拟控制器、模拟摇杆或者neGcon时，\n"
+      "此选项可以允许动态校正模拟输入。\n"
+      "最大输入值会被动态实时监测，用于缩放传输给模拟器的坐标范围。\n"
+      "某些游戏例如 Mega Man Legends 2 需要打开此项，他们需要比现今控制器能提供的更大的输入值。\n"
+      "为获得最佳效果，每次游戏载入时应全范围旋转模拟摇杆一圈，以优化校准算法。",
       {
          { "disabled", NULL },
          { "enabled",  NULL },
@@ -1570,8 +1598,10 @@ struct retro_core_option_definition option_defs_chs[] = {
    },
    {
       BEETLE_OPT(analog_toggle),
-      "Enable DualShock Analog Mode Toggle",
-      "When the input device type is DualShock, sets whether or not the emulated DualShock can be toggled between DIGITAL and ANALOG mode like original hardware. When this option is disabled, the DualShock is locked to ANALOG mode and when enabled, the DualShock can be toggled between DIGITAL and ANALOG mode by pressing and holding START+SELECT+L1+L2+R1+R2.",
+      "启用双震动手柄模拟模式切换",
+      "当输入设备是双震动手柄时，设置是否模拟双震动手柄的数字和模拟模式切换功能。\n"
+      "如果设为禁用，双震动手柄锁定为模拟模式；\n"
+      "如果设为启用，双震动手柄可以通过同时按住'开始+选择+L1+L2+R1+R2'切换模拟和数字模式。",
       {
          { "disabled", NULL },
          { "enabled",  NULL },
@@ -1581,8 +1611,8 @@ struct retro_core_option_definition option_defs_chs[] = {
    },
    {
       BEETLE_OPT(enable_multitap_port1),
-      "Port 1: Multitap Enable",
-      "Enables/Disables multitap functionality on port 1.",
+      "端口 1: 启用分插器",
+      "启用/禁用端口1上的手柄分插器功能。",
       {
          { "disabled", NULL },
          { "enabled",  NULL },
@@ -1592,8 +1622,8 @@ struct retro_core_option_definition option_defs_chs[] = {
    },
    {
       BEETLE_OPT(enable_multitap_port2),
-      "Port 2: Multitap Enable",
-      "Enables/Disables multitap functionality on port 2.",
+      "端口 2: 启用分插器",
+      "启用/禁用端口2上的手柄分插器功能。",
       {
          { "disabled", NULL },
          { "enabled",  NULL },
@@ -1603,11 +1633,11 @@ struct retro_core_option_definition option_defs_chs[] = {
    },
    {
       BEETLE_OPT(gun_input_mode),
-      "Gun Input Mode",
-      "Specify whether to use a mouse-controlled 'Light Gun' or a 'Touchscreen' input when device type is set to 'Guncon / G-Con 45' or 'Justifier'.",
+      "光枪输入模式",
+      "当输入设备类型设为'Guncon / G-Con 45' 或者 'Justifier'时，指定是使用鼠标模拟的'光枪'还是'触摸屏'输入。",
       {
-         { "lightgun",    "Light Gun" },
-         { "touchscreen", "Touchscreen" },
+         { "lightgun",    "光枪" },
+         { "touchscreen", "触摸屏" },
          { NULL, NULL },
       },
       "lightgun"
@@ -1615,11 +1645,12 @@ struct retro_core_option_definition option_defs_chs[] = {
    // Shouldn't the gun_input_mode just be Mouse vs. Touchscreen?
    {
       BEETLE_OPT(gun_cursor),
-      "Gun Cursor",
-      "Select the gun cursor to be displayed on screen while using the the 'Guncon / G-Con 45' and 'Justifier' input device types. When disabled, cross hairs are always hidden.",
+      "光枪准心",
+      "使用'Guncon / G-Con 45' 或者 'Justifier'输入设备时，选择显示的光枪准心。\n"
+      "如果禁用，准心总是隐藏。",
       {
-         { "cross", "Cross" },
-         { "dot",   "Dot" },
+         { "cross", "十字" },
+         { "dot",   "点" },
          { "off",   "disabled" },
          { NULL, NULL },
       },
@@ -1627,8 +1658,8 @@ struct retro_core_option_definition option_defs_chs[] = {
    },
    {
       BEETLE_OPT(mouse_sensitivity),
-      "Mouse Sensitivity",
-      "Configure the response of the 'Mouse' input device type.",
+      "鼠标灵敏度",
+      "设置鼠标输入设备的灵敏度。",
       {
          { "5%",   NULL },
          { "10%",  NULL },
@@ -1676,20 +1707,30 @@ struct retro_core_option_definition option_defs_chs[] = {
    },
    {
       BEETLE_OPT(negcon_response),
-      "NegCon Twist Response",
-      "Specifies the response of the RetroPad left analog stick when simulating the 'twist' action of emulated 'neGcon' input devices. Analog stick displacement may be mapped to negCon rotation angle either linearly, quadratically or cubically. 'Quadratic' allows for greater precision than 'Linear' when making small movements. 'Cubic' further increases small movement precision, but 'exaggerates' larger movements. Note: 'Linear' is only recommended when using racing wheel peripherals. Conventional gamepads implement analog input in a manner fundamentally different from the neGcon 'twist' mechanism, such that linear mapping over-amplifies small movements, impairing fine control. In most cases, 'Quadratic' provides the closest approximation of real hardware.",
+      "NegCon 扭转响应",
+      "指定左模拟摇杆模拟'neGcon'输入设备的'扭转'功能时的响应方式。\n"
+      "模拟摇杆位移量可以通过线性，二次方，三次方算法映射为negCon的旋转角度。\n"
+      "进行小的移动时，'二次方'比'线性'提供更高的精度。\n"
+      "'三次方'精度更高，但是会'夸大'较大的移动。\n"
+      "注意：'线性'只推荐使用赛车方向盘周边时使用。\n"
+      "传统手柄实现模拟输入的方式和 neGcon '扭转'的机制基本原理不同，\n"
+      "因此线性映射过度放大小的移动，会损害控制体验。\n"
+      "大多数情况下，'二次方'提供和真实硬件最为接近的体验。",
       {
-         { "linear",    "Linear" },
-         { "quadratic", "Quadratic" },
-         { "cubic",     "Cubic" },
+         { "linear",    "线性" },
+         { "quadratic", "二次方" },
+         { "cubic",     "三次方" },
          { NULL, NULL },
       },
       "linear"
    },
    {
       BEETLE_OPT(negcon_deadzone),
-      "NegCon Twist Deadzone",
-      "Sets the deadzone of the RetroPad left analog stick when simulating the 'twist' action of emulated 'neGcon' input devices. Used to eliminate controller drift. Note: Most negCon-compatible titles provide in-game options for setting a 'twist' deadzone value. To avoid loss of precision, the in-game deadzone should *always* be set to zero. Any required adjustments should *only* be applied via this core option. This is particularly important when 'NegCon Twist Response' is set to 'Quadratic' or 'Cubic'.",
+      "NegCon 扭转盲区",
+      "设置左模拟摇杆模拟'neGcon'输入设备的'扭转'功能时的盲区，用于消除摇杆漂移。\n"
+      "注意：大多数 negCon 兼容游戏提供游戏内的选项以设置'扭转'盲区值。\n"
+      "为避免损失精度，游戏内的盲区设置应该永远设为0，\n"
+      "所有调节都应通过此选项设置，特别是当'NegCon 扭转响应'设为'二次方'或'立方'时尤其重要。",
       {
          { "0%",  NULL },
          { "5%",  NULL },
