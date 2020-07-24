@@ -90,7 +90,7 @@ ifneq (,$(findstring unix,$(platform)))
    fpic   := -fPIC
    ifneq ($(findstring SunOS,$(shell uname -a)),)
       GREP = ggrep
-      SHARED := -shared -z defs -z gnu-version-script-compat
+      SHARED := -shared -z defs
    else
       GREP = grep
       SHARED := -shared -Wl,--no-undefined -Wl,--version-script=link.T
@@ -99,13 +99,13 @@ ifneq (,$(findstring unix,$(platform)))
       IS_X86 = 1
    endif
    ifneq (,$(findstring Haiku,$(shell uname -s)))
-     LDFLAGS += $(PTHREAD_FLAGS) -lroot
+      LDFLAGS += $(PTHREAD_FLAGS) -lroot
    else
-     LDFLAGS += $(PTHREAD_FLAGS) -ldl
-   endif
-   ifeq ($(HAVE_LIGHTREC), 1)
-      LDFLAGS += -lrt
-      FLAGS += -DHAVE_SHM
+      LDFLAGS += $(PTHREAD_FLAGS) -ldl
+      ifeq ($(HAVE_LIGHTREC), 1)
+         LDFLAGS += -lrt
+         FLAGS += -DHAVE_SHM
+      endif
    endif
    FLAGS   +=
    ifeq ($(HAVE_OPENGL),1)
@@ -666,9 +666,9 @@ endif
 
 clean:
 	@rm -f $(OBJECTS)
-	@echo rm -f *.o
+	@echo rm -f "*.o"
 	@rm -f $(DEPS)
-	@echo rm -f *.d
+	@echo rm -f "*.d"
 	rm -f $(TARGET) $(TARGET_TMP)
 
 .PHONY: clean
