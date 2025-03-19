@@ -362,10 +362,7 @@ int CDIF_MT::ReadThreadStart()
 
       // Don't read >= the "end" of the disc, silly snake.  Slither.
       if(ra_count && ra_lba == disc_toc.tracks[100].lba)
-      {
          ra_count = 0;
-         //printf("Ephemeral scarabs: %d!\n", ra_lba);
-      }
 
       if(ra_count)
       {
@@ -424,6 +421,12 @@ CDIF_MT::~CDIF_MT()
       SBMutex = NULL;
    }
 
+   if(SBCond)
+   {
+      scond_free(SBCond);
+      SBCond = NULL;
+   }
+
    if(disc_cdaccess)
    {
       delete disc_cdaccess;
@@ -445,10 +448,7 @@ bool CDIF_MT::ReadRawSector(uint8 *buf, uint32 lba, int64 timeout_us)
    // This shouldn't happen, the emulated-system-specific CDROM emulation code should make sure the emulated program doesn't try
    // to read past the last "real" sector of the disc.
    if(lba >= disc_toc.tracks[100].lba)
-   {
-      printf("Attempt to read LBA %d, >= LBA %d\n", lba, disc_toc.tracks[100].lba);
       return(false);
-   }
 
    ReadThreadQueue.Write(CDIF_Message(CDIF_MSG_READ_SECTOR, lba));
 
@@ -500,7 +500,6 @@ bool CDIF_MT::ReadRawSectorPWOnly(uint8 *buf, uint32 lba, bool hint_fullread)
    // to read past the last "real" sector of the disc.
    if(lba >= disc_toc.tracks[100].lba)
    {
-      printf("Attempt to read LBA %d, >= LBA %d\n", lba, disc_toc.tracks[100].lba);
       memset(buf, 0, 96);
       return(false);
    }
@@ -562,10 +561,7 @@ int CDIF::ReadSector(uint8* pBuf, uint32 lba, uint32 nSectors)
       uint8_t tmpbuf[2352 + 96];
 
       if(!ReadRawSector(tmpbuf, lba))
-      {
-         puts("CDIF Raw Read error");
          return(false);
-      }
 
       if(!ValidateRawSector(tmpbuf))
          return(false);
@@ -584,7 +580,6 @@ int CDIF::ReadSector(uint8* pBuf, uint32 lba, uint32 nSectors)
             memcpy(pBuf, &tmpbuf[12 + 4 + 8], 2048);
             break;
          default:
-            printf("CDIF_ReadSector() invalid sector type at LBA=%u\n", (unsigned int)lba);
             return(false);
       }
 
@@ -599,8 +594,6 @@ int CDIF::ReadSector(uint8* pBuf, uint32 lba, uint32 nSectors)
 
 CDIF_ST::CDIF_ST(CDAccess *cda) : disc_cdaccess(cda)
 {
-   //puts("***WARNING USING SINGLE-THREADED CD READER***");
-
    UnrecoverableError = false;
    DiscEjected = false;
 
@@ -649,7 +642,6 @@ bool CDIF_ST::ReadRawSectorPWOnly(uint8 *buf, uint32 lba, bool hint_fullread)
    // to read past the last "real" sector of the disc.
    if(lba >= disc_toc.tracks[100].lba)
    {
-      printf("Attempt to read LBA %d, >= LBA %d\n", lba, disc_toc.tracks[100].lba);
       memset(buf, 0, 96);
       return(false);
    }
@@ -696,7 +688,7 @@ class CDIF_Stream_Thing : public Stream
       virtual uint8 *map(void);
       virtual void unmap(void);
 
-      virtual uint64 read(void *data, uint64 count, bool error_on_eos = true);
+      virtual uint64 read(void *data, uint64 count);
       virtual void write(const void *data, uint64 count);
 
       virtual void seek(int64 offset, int whence);
@@ -733,17 +725,12 @@ void CDIF_Stream_Thing::unmap(void)
 
 }
 
-uint64 CDIF_Stream_Thing::read(void *data, uint64 count, bool error_on_eos)
+uint64 CDIF_Stream_Thing::read(void *data, uint64 count)
 {
    uint64_t rp;
 
    if(count > (((uint64)sector_count * 2048) - position))
-   {
-      if(error_on_eos)
-         throw MDFN_Error(0, "EOF");
-
       count = ((uint64)sector_count * 2048) - position;
-   }
 
    if(!count)
       return(0);
@@ -752,8 +739,7 @@ uint64 CDIF_Stream_Thing::read(void *data, uint64 count, bool error_on_eos)
    {
       uint8_t buf[2048];  
 
-      if(!cdintf->ReadSector(buf, start_lba + (rp / 2048), 1))
-         throw MDFN_Error(ErrnoHolder(EIO));
+      cdintf->ReadSector(buf, start_lba + (rp / 2048), 1);
 
       memcpy((uint8_t*)data + (rp - position),
             buf + (rp & 2047),
@@ -768,7 +754,6 @@ uint64 CDIF_Stream_Thing::read(void *data, uint64 count, bool error_on_eos)
 
 void CDIF_Stream_Thing::write(const void *data, uint64 count)
 {
-   throw MDFN_Error(ErrnoHolder(EBADF));
 }
 
 void CDIF_Stream_Thing::seek(int64 offset, int whence)
@@ -789,9 +774,6 @@ void CDIF_Stream_Thing::seek(int64 offset, int whence)
          new_position = ((int64)sector_count * 2048) + offset;
          break;
    }
-
-   if(new_position < 0 || new_position > ((int64)sector_count * 2048))
-      throw MDFN_Error(ErrnoHolder(EINVAL));
 
    position = new_position;
 }

@@ -57,6 +57,7 @@
 #include "mdec.h"
 
 #include "../masmem.h"
+#include "../math_ops.h"
 #include "../state_helpers.h"
 
 #include "FastFIFO.h"
@@ -122,6 +123,8 @@ static const uint8 ZigZag[64] =
  0x17, 0x1f, 0x26, 0x2d, 0x34, 0x3b, 0x3c, 0x35,
  0x2e, 0x27, 0x2f, 0x36, 0x3d, 0x3e, 0x37, 0x3f,
 };
+
+extern int32 EventCycles;
 
 void MDEC_Power(void)
 {
@@ -526,11 +529,11 @@ void MDEC_Run(int32 clocks)
 
    ClockCounter += clocks;
 
-   if(ClockCounter > 128)
+   if(ClockCounter > EventCycles)
    {
       //if(MDRPhase != 0)
       // printf("SNORT: %d\n", ClockCounter);
-      ClockCounter = 128;
+      ClockCounter = EventCycles;
    }
 
    switch(MDRPhase + MDRPhaseBias)

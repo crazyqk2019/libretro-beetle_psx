@@ -1,13 +1,17 @@
 DEBUG = 0
 FRONTEND_SUPPORTS_RGB565 = 1
 HAVE_OPENGL = 0
+GLES = 0
+GLES3 = 0 # HW renderer now supported on GLES3
 HAVE_VULKAN = 0
 HAVE_JIT = 0
 HAVE_CHD = 1
 HAVE_CDROM = 0
 HAVE_LIGHTREC = 1
+LINK_STATIC_LIBCPLUSPLUS = 1
 THREADED_RECOMPILER = 1
 LIGHTREC_DEBUG = 0
+LIGHTREC_LOG_LEVEL = 3
 
 CORE_DIR := .
 HAVE_GRIFFIN = 0
@@ -50,7 +54,6 @@ endif
 NEED_CD = 1
 NEED_TREMOR = 1
 NEED_BPP = 32
-WANT_NEW_API = 1
 NEED_DEINTERLACER = 1
 NEED_THREADING = 1
 SET_HAVE_HW = 0
@@ -95,6 +98,9 @@ ifneq (,$(findstring unix,$(platform)))
       GREP = grep
       SHARED := -shared -Wl,--no-undefined -Wl,--version-script=link.T
    endif
+   ifeq ($(LINK_STATIC_LIBCPLUSPLUS),1)
+      LDFLAGS += -static-libgcc -static-libstdc++
+   endif
    ifneq ($(shell uname -p | $(GREP) -E '((i.|x)86|amd64)'),)
       IS_X86 = 1
    endif
@@ -113,7 +119,7 @@ ifneq (,$(findstring unix,$(platform)))
          GLES = 1
          GL_LIB := -lGLESv2
       else
-         GL_LIB := -L/usr/local/lib -lGL
+         GL_LIB := -lGL
       endif
    endif
 
@@ -125,7 +131,7 @@ endif
 else ifeq ($(platform), osx)
    TARGET  := $(TARGET_NAME)_libretro.dylib
    fpic    := -fPIC
-   SHARED  := -dynamiclib
+   SHARED  := -dynamiclib -Wl,-exported_symbols_list,libretro.osx.def
    LDFLAGS += $(PTHREAD_FLAGS)
    FLAGS   += $(PTHREAD_FLAGS)
    ifeq ($(arch),ppc)
@@ -143,6 +149,13 @@ else ifeq ($(platform), osx)
    endif
    ifeq ($(HAVE_OPENGL),1)
       GL_LIB := -framework OpenGL
+   endif
+   ifeq ($(CROSS_COMPILE),1)
+	TARGET_RULE   = -target $(LIBRETRO_APPLE_PLATFORM) -isysroot $(LIBRETRO_APPLE_ISYSROOT)
+	CFLAGS   += $(TARGET_RULE)
+	CPPFLAGS += $(TARGET_RULE)
+	CXXFLAGS += $(TARGET_RULE)
+	LDFLAGS  += $(TARGET_RULE)
    endif
 
 # iOS
@@ -162,6 +175,8 @@ else ifneq (,$(findstring ios,$(platform)))
    endif
    ifeq ($(HAVE_OPENGL),1)
       GL_LIB := -framework OpenGLES
+      GLES = 1
+      GLES3 = 1
    endif
 
    CC = cc -arch $(iarch) -isysroot $(IOSSDK)
@@ -172,8 +187,9 @@ else ifneq (,$(findstring ios,$(platform)))
    else
       IPHONEMINVER = -miphoneos-version-min=5.0
    endif
+   HAVE_LIGHTREC = 0
    LDFLAGS += $(IPHONEMINVER)
-   FLAGS   += $(IPHONEMINVER)
+   FLAGS   += $(IPHONEMINVER) -DHAVE_UNISTD_H -DIOS=1
    CC      += $(IPHONEMINVER)
    CXX     += $(IPHONEMINVER)
 
@@ -182,10 +198,25 @@ else ifeq ($(platform), tvos-arm64)
    TARGET := $(TARGET_NAME)_libretro_tvos.dylib
    fpic := -fPIC
    SHARED := -dynamiclib
+   HAVE_LIGHTREC = 0
+   FLAGS += -DHAVE_UNISTD_H -DIOS=1 -DTVOS=1
 
-ifeq ($(IOSSDK),)
-   IOSSDK := $(shell xcodebuild -version -sdk appletvos Path)
-endif
+   ifeq ($(IOSSDK),)
+      IOSSDK := $(shell xcrun -sdk appletvos -show-sdk-path)
+   endif
+   ifeq ($(HAVE_OPENGL),1)
+      GL_LIB := -framework OpenGLES
+      GLES = 1
+      GLES3 = 1
+   endif
+
+   CC = cc -arch arm64 -isysroot $(IOSSDK)
+   CXX = c++ -arch arm64 -isysroot $(IOSSDK)
+   MINVER = -mappletvos-version-min=11.0
+   LDFLAGS += $(MINVER)
+   FLAGS += $(MINVER)
+   CC += $(MINVER)
+   CXX += $(MINVER)
 
 # QNX
 else ifeq ($(platform), qnx)
@@ -310,95 +341,34 @@ else ifeq ($(platform), gcw0)
 else ifeq ($(platform), emscripten)
    TARGET  := $(TARGET_NAME)_libretro_$(platform).bc
    fpic    := -fPIC
-   SHARED  := -shared -Wl,--no-undefined -Wl,--version-script=link.T
-   LDFLAGS += $(PTHREAD_FLAGS)
-   FLAGS   += $(PTHREAD_FLAGS) -Dretro_fopen=gg_retro_fopen\
-               -Dmain=gg_main\
-               -Dretro_fclose=gg_retro_fclose\
-               -Dretro_fseek=gg_retro_fseek\
-               -Dretro_fread=gg_retro_fread\
-               -Dretro_fwrite=gg_retro_fwrite\
-               -Dpath_is_directory=gg_path_is_directory\
-               -Dscond_broadcast=gg_scond_broadcast\
-               -Dscond_wait_timeout=gg_scond_wait_timeout\
-               -Dscond_signal=gg_scond_signal\
-               -Dscond_wait=gg_scond_wait\
-               -Dscond_free=gg_scond_free\
-               -Dscond_new=gg_scond_new\
-               -Dslock_unlock=gg_slock_unlock\
-               -Dslock_lock=gg_slock_lock\
-               -Dslock_free=gg_slock_free\
-               -Dslock_new=gg_slock_new\
-               -Dsthread_join=gg_sthread_join\
-               -Dsthread_detach=gg_sthread_detach\
-               -Dsthread_create=gg_sthread_create\
-               -Dscond=gg_scond\
-               -Dslock=gg_slock\
-               -Drglgen_symbol_map=mupen_rglgen_symbol_map \
-               -Dmain_exit=mupen_main_exit \
-               -Dadler32=mupen_adler32 \
-               -Drglgen_resolve_symbols_custom=mupen_rglgen_resolve_symbols_custom \
-               -Drglgen_resolve_symbols=mupen_rglgen_resolve_symbols \
-               -Dsinc_resampler=mupen_sinc_resampler \
-               -Dnearest_resampler=mupen_nearest_resampler \
-               -DCC_resampler=mupen_CC_resampler \
-               -Daudio_resampler_driver_find_handle=mupen_audio_resampler_driver_find_handle \
-               -Daudio_resampler_driver_find_ident=mupen_audio_resampler_driver_find_ident \
-               -Drarch_resampler_realloc=mupen_rarch_resampler_realloc \
-               -Daudio_convert_s16_to_float_C=mupen_audio_convert_s16_to_float_C \
-               -Daudio_convert_float_to_s16_C=mupen_audio_convert_float_to_s16_C \
-               -Daudio_convert_init_simd=mupen_audio_convert_init_simd \
-               -Dfilestream_open=gg_filestream_open\
-               -Dfilestream_get_fd=gg_filestream_get_fd\
-               -Dfilestream_read=gg_filestream_read\
-               -Dfilestream_seek=gg_filestream_seek\
-               -Dfilestream_close=gg_filestream_close\
-               -Dfilestream_tell=gg_filestream_tell\
-               -Dfilestream_set_size=gg_filestream_set_size\
-               -Dfilestream_get_ext=gg_filestream_get_ext\
-               -Dfilestream_get_size=gg_filestream_get_size\
-               -Dfilestream_read_file=gg_filestream_read_file\
-               -Dfilestream_write_file=gg_filestream_write_file\
-               -Dfilestream_write=gg_filestream_write\
-               -Dfilestream_rewind=gg_filestream_rewind\
-               -Dfilestream_putc=gg_filestream_putc\
-               -Dfilestream_getline=gg_filestream_getline\
-               -Dfilestream_getc=gg_filestream_getc\
-               -Dfilestream_gets=gg_filestream_gets\
-               -Dfilestream_eof=gg_filestream_eof\
-               -Dfilestream_flush=gg_filestream_flush\
-               -Dpath_is_character_special=gg_path_is_character_special\
-               -Dpath_is_valid=gg_path_is_valid\
-               -Dpath_is_compressed=gg_path_is_compressed\
-               -Dpath_is_compressed_file=gg_path_is_compressed_file\
-               -Dpath_is_absolute=gg_path_is_absolute\
-               -Dpath_is_directory=gg_path_is_directory\
-               -Dpath_get_size=gg_path_get_size\
-               -Dpath_get_extension=gg_path_get_extension\
-               -Dstring_is_empty=gg_string_is_empty\
-               -Dstring_is_equal=gg_string_is_equal\
-               -Dstring_to_upper=gg_string_to_upper\
-               -Dstring_to_lower=gg_string_to_lower\
-               -Dstring_ucwords=gg_string_ucwords\
-               -Dstring_replace_substring=gg_string_replace_substring\
-               -Dstring_trim_whitespace_left=gg_string_trim_whitespace_left\
-               -Dstring_trim_whitespace_right=gg_string_trim_whitespace_right\
-               -Dstring_trim_whitespace_left=gg_string_trim_whitespace_left\
-               -Dstring_trim_whitespace=gg_string_trim_whitespace\
-               -Dsthread_isself=gg_sthread_isself\
-               -Dstring_is_equal_noncase=gg_string_is_equal_noncase\
-               -Dmkdir_norecurse=gg_mkdir_norecurse
+   FLAGS   += -DEMSCRIPTEN
+   FLAGS   += -msimd128 -ftree-vectorize
+
+   HAVE_OPENGL = 1
+   GLES = 1
+   GLES3 = 1
+   HAVE_LIGHTREC = 0
+   NEED_THREADING = 0
+   HAVE_CDROM = 0
+   THREADED_RECOMPILER = 0
 
    STATIC_LINKING = 1
 
-   ifeq ($(HAVE_OPENGL),1)
-      ifneq (,$(findstring gles,$(platform)))
-         GLES = 1
-         GL_LIB := -lGLESv2
-      else
-         GL_LIB := -lGL
-      endif
-   endif
+# Raspberry Pi 4 in 64bit mode
+else ifeq ($(platform), rpi4_64)
+   TARGET := $(TARGET_NAME)_libretro.so
+   fpic   := -fPIC
+   GREP = grep
+   SHARED := -shared -Wl,--no-undefined -Wl,--version-script=link.T
+   CFLAGS   += -O3 -DNDEBUG -march=armv8-a+crc+simd -mtune=cortex-a72 -fsigned-char 
+   CXXFLAGS += -O3 -DNDEBUG -march=armv8-a+crc+simd -mtune=cortex-a72 -fsigned-char
+   LDFLAGS += $(PTHREAD_FLAGS) -ldl -lrt
+   HAVE_LIGHTREC = 1
+   FLAGS += -DHAVE_SHM
+   GLES = 1
+   GLES3 = 1
+   GL_LIB := -lGLESv2
+   HAVE_CDROM = 0
 
 # Windows MSVC 2017 all architectures
 else ifneq (,$(findstring windows_msvc2017,$(platform)))
@@ -491,7 +461,6 @@ else ifneq (,$(findstring windows_msvc2017,$(platform)))
    export LIB := $(LIB);$(WindowsSDKUCRTLibDir);$(WindowsSDKUMLibDir)
    TARGET := $(TARGET_NAME)_libretro.dll
    TARGET_TMP := $(TARGET_NAME)_libretro.lib $(TARGET_NAME)_libretro.pdb $(TARGET_NAME)_libretro.exp
-   PSS_STYLE :=2
    LDFLAGS += -DLL
 
 # Windows
@@ -585,12 +554,9 @@ FLAGS   += $(fpic) $(NEW_GCC_FLAGS)
 FLAGS   += $(INCFLAGS)
 
 FLAGS += $(ENDIANNESS_DEFINES) \
-         -DSIZEOF_DOUBLE=8 \
          $(WARNINGS) \
          -DMEDNAFEN_VERSION=\"0.9.38.6\" \
-         -DPACKAGE=\"mednafen\" \
          -DMEDNAFEN_VERSION_NUMERIC=9386 \
-         -DPSS_STYLE=1 \
          -DMPC_FIXED_POINT \
          $(CORE_DEFINE) \
          -DSTDC_HEADERS \
@@ -653,16 +619,13 @@ ifeq ($(STATIC_LINKING), 1)
 	$(AR) rcs $@ $(OBJECTS)
 else
 	@$(LD) $(LINKOUT)$@ $^ $(LDFLAGS) $(GL_LIB) $(LIBS)
-	@echo "LD $(TARGET)"
 endif
 
 %.o: %.cpp
-	@$(CXX) -c $(OBJOUT)$@ $< $(CXXFLAGS)
-	@echo "CXX $<"
+	$(CXX) -c $(OBJOUT)$@ $< $(CXXFLAGS)
 
 %.o: %.c
-	@$(CC) -c $(OBJOUT)$@ $< $(CFLAGS)
-	@echo "CC $<"
+	$(CC) -c $(OBJOUT)$@ $< $(CFLAGS)
 
 clean:
 	@rm -f $(OBJECTS)

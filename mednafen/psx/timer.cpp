@@ -111,9 +111,11 @@ static bool hretrace;
 static Timer Timers[3];
 static int32_t lastts;
 
+extern int32 EventCycles;
+
 static uint32_t CalcNextEvent(void)
 {
-   int32_t next_event = 1024; /**/
+   int32_t next_event = 8*EventCycles; /**/
 
    unsigned i;
    for(i = 0; i < 3; i++)
@@ -173,15 +175,6 @@ static bool MDFN_FASTCALL TimerMatch(unsigned i)
       if(Timers[i].Counter == 0 || Timers[i].Counter == Timers[i].Target)
          irq_exact = true;
 
-#if 0
-      {
-         const uint16_t lateness = (Timers[i].Mode & 0x008) ? Timers[i].Counter : (Timers[i].Counter - Timers[i].Target);
-
-         if(lateness > ((i == 1 && (Timers[i].Mode & 0x100)) ? 0 : 3))
-            PSX_DBG(PSX_DBG_WARNING, "[TIMER] Timer %d match IRQ trigger late: %u\n", i, lateness);
-      }
-#endif
-
       Timers[i].IRQDone = true;
       IRQ_Assert(IRQ_TIMER_0 + i, true);
       IRQ_Assert(IRQ_TIMER_0 + i, false);
@@ -201,11 +194,6 @@ static bool MDFN_FASTCALL TimerOverflow(unsigned i)
    {
       if(Timers[i].Counter == 0)
          irq_exact = true;
-
-#if 0
-      if(Timers[i].Counter > ((i == 1 && (Timers[i].Mode & 0x100)) ? 0 : 3))
-         PSX_DBG(PSX_DBG_WARNING, "[TIMER] Timer %d overflow IRQ trigger late: %u\n", i, Timers[i].Counter);
-#endif
 
       Timers[i].IRQDone = true;
       IRQ_Assert(IRQ_TIMER_0 + i, true);
@@ -395,10 +383,6 @@ void MDFN_FASTCALL TIMER_Write(const int32_t timestamp, uint32_t A, uint16_t V)
 
    V <<= (A & 3) * 8;
 
-   /*
-   PSX_DBGINFO("[TIMER] Write: %08x %04x\n", A, V);
-   */
-
    if(which >= 3)
       return;
 
@@ -487,15 +471,15 @@ int TIMER_StateAction(void *sm, const unsigned load, const bool data_only)
       SFVARN(Timers[n].Counter, #n "Counter"),     \
       SFVARN(Timers[n].Target, #n "Target"),       \
       SFVARN(Timers[n].Div8Counter, #n "Div8Counter"),   \
-      SFVARN(Timers[n].IRQDone, #n "IRQDone"),     \
+      SFVARN_BOOL(Timers[n].IRQDone, #n "IRQDone"),     \
       SFVARN(Timers[n].DoZeCounting, #n "DoZeCounting")
       SFTIMER(0),
       SFTIMER(1),
       SFTIMER(2),
 #undef SFTIMER
 
-      SFVAR(vblank),
-      SFVAR(hretrace),
+      SFVARN_BOOL(vblank, "vblank"),
+      SFVARN_BOOL(hretrace, "hretrace"),
 
       SFEND
    };

@@ -6,7 +6,7 @@
 [subrepo]
 	remote = https://github.com/pcercuei/lightrec.git
 	branch = master
-	commit = 2cca097e538876d219b8af9663abe0ca74f68bb2
-	parent = 9f797430963d9cf0fcef7d963466f9cac7026de2
+	commit = 0df4ec86ba664dad3b4cc24fd3199131e8e3219f
+	parent = 364a705dc70b57a734b4e362226a386b34a008fb
 	method = merge
-	cmdver = 0.4.1
+	cmdver = 0.4.3

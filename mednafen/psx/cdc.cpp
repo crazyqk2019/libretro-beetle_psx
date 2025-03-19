@@ -63,9 +63,7 @@ PS_CDC::PS_CDC() : DMABuffer(4096)
    DriveStatus = DS_STOPPED;
    PendingCommandPhase = 0;
 
-#ifndef HAVE_CDROM_NEW
    TOC_Clear(&toc);
-#endif
 }
 
 extern unsigned cd_2x_speedup;
@@ -240,8 +238,8 @@ int PS_CDC::StateAction(StateMem *sm, int load, int data_only)
 {
    SFORMAT StateRegs[] =
    {
-      SFVAR(DiscChanged),
-      SFVAR(DiscStartupDelay),
+      SFVARN_BOOL(DiscChanged, "DiscChanged"),
+      SFVARN(DiscStartupDelay, "DiscStartupDelay"),
 
       SFARRAY16(&AudioBuffer.Samples[0][0], sizeof(AudioBuffer.Samples) / sizeof(AudioBuffer.Samples[0][0])),
       SFVAR(AudioBuffer.Size),
@@ -252,12 +250,12 @@ int PS_CDC::StateAction(StateMem *sm, int load, int data_only)
       SFARRAY(&DecodeVolume[0][0], 2 * 2),
 
       SFARRAY16(&ADPCM_ResampBuf[0][0], sizeof(ADPCM_ResampBuf) / sizeof(ADPCM_ResampBuf[0][0])),
-      SFVAR(ADPCM_ResampCurPhase),
-      SFVAR(ADPCM_ResampCurPos),
+      SFVARN(ADPCM_ResampCurPhase, "ADPCM_ResampCurPhase"),
+      SFVARN(ADPCM_ResampCurPos, "ADPCM_ResampCurPos"),
 
 
 
-      SFVAR(RegSelector),
+      SFVARN(RegSelector, "RegSelector"),
       SFARRAY(ArgsBuf, 16),
       SFVAR(ArgsWP),
       SFVAR(ArgsRP),
@@ -1325,11 +1323,6 @@ int32_t PS_CDC::Update(const int32_t timestamp)
                      else if(ArgsReceiveIn < Commands[PendingCommand].args_min || 
                            ArgsReceiveIn > Commands[PendingCommand].args_max)
                      {
-                        PSX_DBG(PSX_DBG_WARNING, "[CDC] Bad number(%d) of args(first check) for command 0x%02x", ArgsReceiveIn, PendingCommand);
-                        for(unsigned int i = 0; i < ArgsReceiveIn; i++)
-                           PSX_DBG(PSX_DBG_WARNING, " 0x%02x", ArgsReceiveBuf[i]);
-                        PSX_DBG(PSX_DBG_WARNING, "\n");
-
                         WriteResult(MakeStatus(true));
                         WriteResult(ERRCODE_BAD_NUMARGS);
                         WriteIRQ(CDCIRQ_DISC_ERROR);
@@ -1337,12 +1330,6 @@ int32_t PS_CDC::Update(const int32_t timestamp)
                      else
                      {
                         const CDC_CTEntry *command = &Commands[PendingCommand];
-
-                        PSX_DBG(PSX_DBG_SPARSE, "[CDC] Command: %s --- ", command->name);
-                        for(unsigned int i = 0; i < ArgsReceiveIn; i++)
-                           PSX_DBG(PSX_DBG_SPARSE, " 0x%02x", ArgsReceiveBuf[i]);
-                        PSX_DBG(PSX_DBG_SPARSE, "\n");
-
                         next_time = (this->*(command->func))(ArgsReceiveIn, ArgsReceiveBuf);
                         PendingCommandPhase = 2;
                      }
@@ -1682,9 +1669,6 @@ int32 PS_CDC::CalcSeekTime(int32 initial, int32 target, bool motor_on, bool paus
    // ret += 1000000;
 
    ret += PSX_GetRandU32(0, 25000);
-
-   PSX_DBG(PSX_DBG_SPARSE, "[CDC] CalcSeekTime() %d->%d = %d\n", initial, target, ret);
-
    return(ret);
 }
 
@@ -1843,7 +1827,7 @@ void PS_CDC::ReadBase(void)
 
       if(CommandLoc_Dirty)
          SeekTarget = CommandLoc;
-      else if (DriveStatus != DS_PAUSED && DriveStatus != DS_STANDBY)
+      else
          SeekTarget = CurSector;
 
       PSRCounter = /*903168 * 1.5 +*/ CalcSeekTime(CurSector, SeekTarget, DriveStatus != DS_STOPPED, DriveStatus == DS_PAUSED);

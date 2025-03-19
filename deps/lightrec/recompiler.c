@@ -1,15 +1,6 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
- * Copyright (C) 2019-2020 Paul Cercueil <paul@crapouillou.net>
- *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 2.1 of the License, or (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Lesser General Public License for more details.
+ * Copyright (C) 2019-2021 Paul Cercueil <paul@crapouillou.net>
  */
 
 #include "debug.h"
@@ -53,7 +44,7 @@ static void lightrec_compile_list(struct recompiler *rec)
 
 		pthread_mutex_unlock(&rec->mutex);
 
-		ret = lightrec_compile_block(block);
+		ret = lightrec_compile_block(rec->state, block);
 		if (ret) {
 			pr_err("Unable to compile block at PC 0x%x: %d\n",
 			       block->pc, ret);
@@ -126,6 +117,8 @@ struct recompiler *lightrec_recompiler_init(struct lightrec_state *state)
 		pr_err("Cannot create recompiler thread: %d\n", ret);
 		goto err_mtx_destroy;
 	}
+
+	pr_info("Threaded recompiler started\n");
 
 	return rec;
 
@@ -249,7 +242,8 @@ void lightrec_recompiler_remove(struct recompiler *rec, struct block *block)
 	pthread_mutex_unlock(&rec->mutex);
 }
 
-void * lightrec_recompiler_run_first_pass(struct block *block, u32 *pc)
+void * lightrec_recompiler_run_first_pass(struct lightrec_state *state,
+					  struct block *block, u32 *pc)
 {
 	bool freed;
 
@@ -263,8 +257,7 @@ void * lightrec_recompiler_run_first_pass(struct block *block, u32 *pc)
 
 				/* The block was already compiled but the opcode list
 				 * didn't get freed yet - do it now */
-				lightrec_free_opcode_list(block->state,
-							  block->opcode_list);
+				lightrec_free_opcode_list(state, block);
 				block->opcode_list = NULL;
 			}
 		}
@@ -277,7 +270,7 @@ void * lightrec_recompiler_run_first_pass(struct block *block, u32 *pc)
 	freed = atomic_flag_test_and_set(&block->op_list_freed);
 
 	/* Block wasn't compiled yet - run the interpreter */
-	*pc = lightrec_emulate_block(block, *pc);
+	*pc = lightrec_emulate_block(state, block, *pc);
 
 	if (!freed)
 		atomic_flag_clear(&block->op_list_freed);
@@ -289,7 +282,7 @@ void * lightrec_recompiler_run_first_pass(struct block *block, u32 *pc)
 		pr_debug("Block PC 0x%08x is fully tagged"
 			 " - free opcode list\n", block->pc);
 
-		lightrec_free_opcode_list(block->state, block->opcode_list);
+		lightrec_free_opcode_list(state, block);
 		block->opcode_list = NULL;
 	}
 

@@ -76,11 +76,7 @@
 uint32_t IntermediateBufferPos;
 int16_t IntermediateBuffer[4096][2];
 
-//#define SPUIRQ_DBG(format, ...) { printf("[SPUIRQDBG] " format " -- Voice 22 CA=0x%06x,LA=0x%06x\n", ## __VA_ARGS__, Voices[22].CurAddr, Voices[22].LoopAddr); }
-
-static INLINE void SPUIRQ_DBG(const char *fmt, ...)
-{
-}
+extern uint8_t spu_samples;
 
 static const int16 FIR_Table[256][4] =
 {
@@ -172,9 +168,8 @@ void PS_SPU::Power(void)
    CWA = 0;
 
    memset(Regs, 0, sizeof(Regs));
-
+   memset(AuxRegs, 0, sizeof(AuxRegs));
    memset(RDSB, 0, sizeof(RDSB));
-
    memset(RUSB, 0, sizeof(RUSB));
    RvbResPos = 0;
 
@@ -253,7 +248,6 @@ void SPU_Sweep::Clock()
    int divinco;
 
    CalcVCDelta(0x7F, Control & 0x7F, log_mode, dec_mode, inv_increment, (int16)(Current ^ vc_cv_xor), increment, divinco);
-   //printf("%d %d\n", divinco, increment);
 
    if((dec_mode & !(inv_mode & log_mode)) && ((Current & 0x8000) == (inv_mode ? 0x0000 : 0x8000) || (Current == 0)))
    {
@@ -274,8 +268,6 @@ void SPU_Sweep::Clock()
          {
             uint16 PrevCurrent = Current;
             Current = Current + increment;
-
-            //printf("%04x %04x\n", PrevCurrent, Current);
 
             if(!dec_mode && ((Current ^ PrevCurrent) & 0x8000) && ((Current ^ TestInvert) & 0x8000))
                Current = 0x7FFF ^ TestInvert;
@@ -313,7 +305,6 @@ void PS_SPU::RunDecoder(SPU_Voice *voice)
          unsigned test_addr = (voice->CurAddr - 1) & 0x3FFFF;
          if(IRQAddr == test_addr || IRQAddr == (test_addr & 0x3FFF8))
          {
-            //SPUIRQ_DBG("SPU IRQ (VDA): 0x%06x", addr);
             IRQAsserted = true;
             IRQ_Assert(IRQ_SPU, IRQAsserted);
          }
@@ -356,7 +347,6 @@ void PS_SPU::RunDecoder(SPU_Voice *voice)
          unsigned test_addr = voice->CurAddr & 0x3FFFF;
          if(IRQAddr == test_addr || IRQAddr == (test_addr & 0x3FFF8))
          {
-            //SPUIRQ_DBG("SPU IRQ: 0x%06x", addr);
             IRQAsserted = true;
             IRQ_Assert(IRQ_SPU, IRQAsserted);
          }
@@ -373,15 +363,6 @@ void PS_SPU::RunDecoder(SPU_Voice *voice)
          {
             if(!voice->IgnoreSampLA)
                voice->LoopAddr = voice->CurAddr;
-#if 0
-            else
-            {
-               if(voice->LoopAddr != voice->CurAddr)
-               {
-                  PSX_DBG(PSX_DBG_FLOOD, "[SPU] Ignore: LoopAddr=0x%08x, SampLA=0x%08x\n", voice->LoopAddr, voice->CurAddr);
-               }
-            }
-#endif
          }
          voice->CurAddr = (voice->CurAddr + 1) & 0x3FFFF;
       }
@@ -403,8 +384,6 @@ void PS_SPU::RunDecoder(SPU_Voice *voice)
 
          if(MDFN_UNLIKELY(shift > 12))
          {
-            //PSX_DBG(PSX_DBG_FLOOD, "[SPU] Buggy/Illegal ADPCM block shift value on voice %u: %u\n", (unsigned)(voice - Voices), shift);
-
             shift = 8;
             CV &= 0x8888;
          }
@@ -543,7 +522,6 @@ INLINE void PS_SPU::CheckIRQAddr(uint32 addr)
       if(IRQAddr != addr)
          return;
 
-      //SPUIRQ_DBG("SPU IRQ (ALT): 0x%06x", addr);
       IRQAsserted = true;
       IRQ_Assert(IRQ_SPU, IRQAsserted);
    }
@@ -573,6 +551,7 @@ static INLINE int16 ReverbSat(int32 samp)
  return(samp);
 }
 
+#define REVERB_NEG(samp) (((samp) == -32768) ? 0x7FFF : -(samp))
 
 INLINE uint32 PS_SPU::Get_Reverb_Offset(uint32 in_offset)
 {
@@ -580,11 +559,6 @@ INLINE uint32 PS_SPU::Get_Reverb_Offset(uint32 in_offset)
 
  offset += ReverbWA & ((int32)(offset << 13) >> 31);
  offset &= 0x3FFFF;
-
- // For debugging in case there are any problems with games misprogramming the reverb registers in a race-conditiony manner that
- // causes important data in SPU RAM to be trashed:
- //if(offset < ReverbWA)
- // printf("BARF: offset=%05x reverbwa=%05x reverbcur=%05x in_offset=%05x\n", offset, ReverbWA, ReverbCur, in_offset & 0x3FFFF);
 
  return(offset);
 }
@@ -596,7 +570,8 @@ int16 NO_INLINE PS_SPU::RD_RVB(uint16 raw_offs, int32 extra_offs)
 
 void NO_INLINE PS_SPU::WR_RVB(uint16 raw_offs, int16 sample)
 {
-   WriteSPURAM(Get_Reverb_Offset(raw_offs << 2), sample);
+   if(SPUControl & 0x80)
+      WriteSPURAM(Get_Reverb_Offset(raw_offs << 2), sample);
 }
 
 //
@@ -629,7 +604,7 @@ static INLINE int32 Reverb2244(const int16 *src)
    int32_t out = 0; /* 32bits is adequate (it won't overflow) */
 
    for(i = 0; i < 20; i++)
-   out += ResampTable[i] * src[i];
+      out += ResampTable[i] * src[i];
 
    out >>= 14;
 
@@ -671,54 +646,42 @@ void PS_SPU::RunReverb(const int32* in, int32* out)
   int32 downsampled[2];
 
   for(unsigned lr = 0; lr < 2; lr++)
-   downsampled[lr] = Reverb4422(&RDSB[lr][(RvbResPos - 39) & 0x3F]);
+   downsampled[lr] = Reverb4422(&RDSB[lr][(RvbResPos - 38) & 0x3F]);
 
   /* Run algorithm */
-  if(SPUControl & 0x80)
+  for(unsigned lr = 0; lr < 2; lr++)
   {
-   int16 ACC0, ACC1;
-   int16 FB_A0, FB_A1, FB_B0, FB_B1;
+     const int16 IIR_INPUT_A = ReverbSat((((RD_RVB(IIR_SRC_A[lr ^ 0]) * IIR_COEF) >> 14) + ((downsampled[lr] * IN_COEF[lr]) >> 14)) >> 1);
+     const int16 IIR_INPUT_B = ReverbSat((((RD_RVB(IIR_SRC_B[lr ^ 1]) * IIR_COEF) >> 14) + ((downsampled[lr] * IN_COEF[lr]) >> 14)) >> 1);
+     const int16 IIR_A = ReverbSat((((IIR_INPUT_A * IIR_ALPHA) >> 14) + (IIASM(IIR_ALPHA, RD_RVB(IIR_DEST_A[lr], -1)) >> 14)) >> 1);
+     const int16 IIR_B = ReverbSat((((IIR_INPUT_B * IIR_ALPHA) >> 14) + (IIASM(IIR_ALPHA, RD_RVB(IIR_DEST_B[lr], -1)) >> 14)) >> 1);
 
-   int16 IIR_INPUT_A0 = ReverbSat(((RD_RVB(IIR_SRC_A0) * IIR_COEF) >> 15) + ((downsampled[0] * IN_COEF_L) >> 15));
-   int16 IIR_INPUT_A1 = ReverbSat(((RD_RVB(IIR_SRC_A1) * IIR_COEF) >> 15) + ((downsampled[1] * IN_COEF_R) >> 15));
-   int16 IIR_INPUT_B0 = ReverbSat(((RD_RVB(IIR_SRC_B0) * IIR_COEF) >> 15) + ((downsampled[0] * IN_COEF_L) >> 15));
-   int16 IIR_INPUT_B1 = ReverbSat(((RD_RVB(IIR_SRC_B1) * IIR_COEF) >> 15) + ((downsampled[1] * IN_COEF_R) >> 15));
+     WR_RVB(IIR_DEST_A[lr], IIR_A);
+     WR_RVB(IIR_DEST_B[lr], IIR_B);
 
-   int16 IIR_A0 = ReverbSat((((IIR_INPUT_A0 * IIR_ALPHA) >> 14) + (IIASM(IIR_ALPHA, RD_RVB(IIR_DEST_A0, -1)) >> 14)) >> 1);
-   int16 IIR_A1 = ReverbSat((((IIR_INPUT_A1 * IIR_ALPHA) >> 14) + (IIASM(IIR_ALPHA, RD_RVB(IIR_DEST_A1, -1)) >> 14)) >> 1);
-   int16 IIR_B0 = ReverbSat((((IIR_INPUT_B0 * IIR_ALPHA) >> 14) + (IIASM(IIR_ALPHA, RD_RVB(IIR_DEST_B0, -1)) >> 14)) >> 1);
-   int16 IIR_B1 = ReverbSat((((IIR_INPUT_B1 * IIR_ALPHA) >> 14) + (IIASM(IIR_ALPHA, RD_RVB(IIR_DEST_B1, -1)) >> 14)) >> 1);
+     const int32 ACC = ((RD_RVB(ACC_SRC_A[lr]) * ACC_COEF_A) >> 14) +
+        ((RD_RVB(ACC_SRC_B[lr]) * ACC_COEF_B) >> 14) +
+        ((RD_RVB(ACC_SRC_C[lr]) * ACC_COEF_C) >> 14) +
+        ((RD_RVB(ACC_SRC_D[lr]) * ACC_COEF_D) >> 14);
 
-   WR_RVB(IIR_DEST_A0, IIR_A0);
-   WR_RVB(IIR_DEST_A1, IIR_A1);
-   WR_RVB(IIR_DEST_B0, IIR_B0);
-   WR_RVB(IIR_DEST_B1, IIR_B1);
+     const int16 FB_A = RD_RVB(MIX_DEST_A[lr] - FB_SRC_A);
+     const int16 FB_B = RD_RVB(MIX_DEST_B[lr] - FB_SRC_B);
+     const int16 MDA = ReverbSat((ACC + ((FB_A * REVERB_NEG(FB_ALPHA)) >> 14)) >> 1);
+     const int16 MDB = ReverbSat(FB_A + ((((MDA * FB_ALPHA) >> 14) + ((FB_B * REVERB_NEG(FB_X)) >> 14)) >> 1));
+     const int16 IVB = ReverbSat(FB_B + ((MDB * FB_X) >> 15));
 
-   ACC0 = ReverbSat((((RD_RVB(ACC_SRC_A0) * ACC_COEF_A) >> 14) +
-	   	     ((RD_RVB(ACC_SRC_B0) * ACC_COEF_B) >> 14) +
-	   	     ((RD_RVB(ACC_SRC_C0) * ACC_COEF_C) >> 14) +
-	   	     ((RD_RVB(ACC_SRC_D0) * ACC_COEF_D) >> 14)) >> 1);
-
-   ACC1 = ReverbSat((((RD_RVB(ACC_SRC_A1) * ACC_COEF_A) >> 14) +
-	   	     ((RD_RVB(ACC_SRC_B1) * ACC_COEF_B) >> 14) +
-	   	     ((RD_RVB(ACC_SRC_C1) * ACC_COEF_C) >> 14) +
-	   	     ((RD_RVB(ACC_SRC_D1) * ACC_COEF_D) >> 14)) >> 1);
-
-   FB_A0 = RD_RVB(MIX_DEST_A0 - FB_SRC_A);
-   FB_A1 = RD_RVB(MIX_DEST_A1 - FB_SRC_A);
-   FB_B0 = RD_RVB(MIX_DEST_B0 - FB_SRC_B);
-   FB_B1 = RD_RVB(MIX_DEST_B1 - FB_SRC_B);
-
-   WR_RVB(MIX_DEST_A0, ReverbSat(ACC0 - ((FB_A0 * FB_ALPHA) >> 15)));
-   WR_RVB(MIX_DEST_A1, ReverbSat(ACC1 - ((FB_A1 * FB_ALPHA) >> 15)));
-
-   WR_RVB(MIX_DEST_B0, ReverbSat(((FB_ALPHA * ACC0) >> 15) - ((FB_A0 * (int16)(0x8000 ^ FB_ALPHA)) >> 15) - ((FB_B0 * FB_X) >> 15)));
-   WR_RVB(MIX_DEST_B1, ReverbSat(((FB_ALPHA * ACC1) >> 15) - ((FB_A1 * (int16)(0x8000 ^ FB_ALPHA)) >> 15) - ((FB_B1 * FB_X) >> 15)));
+     WR_RVB(MIX_DEST_A[lr], MDA);
+     WR_RVB(MIX_DEST_B[lr], MDB);
+#if 0
+     {
+        static uint32 sqcounter;
+        RUSB[lr][(RvbResPos >> 1) | 0x20] = RUSB[lr][RvbResPos >> 1] = ((sqcounter & 0xFF) == 0) ? 0x8000 : 0x0000; //((sqcounter & 0x80) ? 0x7000 : 0x9000);
+        sqcounter += lr;
+     }
+#else
+     RUSB[lr][(RvbResPos >> 1) | 0x20] = RUSB[lr][RvbResPos >> 1] = IVB;	// Output sample
+#endif
   }
-
-  /* Get output samplesq */
-  RUSB[0][(RvbResPos >> 1) | 0x20] = RUSB[0][RvbResPos >> 1] = (RD_RVB(MIX_DEST_A0) + RD_RVB(MIX_DEST_B0)) >> 1;
-  RUSB[1][(RvbResPos >> 1) | 0x20] = RUSB[1][RvbResPos >> 1] = (RD_RVB(MIX_DEST_A1) + RD_RVB(MIX_DEST_B1)) >> 1;
 
   ReverbCur = (ReverbCur + 1) & 0x3FFFF;
   if(!ReverbCur)
@@ -726,16 +689,16 @@ void PS_SPU::RunReverb(const int32* in, int32* out)
 
   for(unsigned lr = 0; lr < 2; lr++)
   {
-     const int16 *src = &RUSB[lr][((RvbResPos - 39) & 0x3F) >> 1];
-     upsampled[lr] = src[9]; /* Reverb 2244 (Middle non-zero */
+     const int16 *src = &RUSB[lr][((RvbResPos >> 1) - 19) & 0x1F];
+     upsampled[lr] = Reverb2244(src);
   }
  }
  else
  {
   for(unsigned lr = 0; lr < 2; lr++)
   {
-     const int16 *src = &RUSB[lr][((RvbResPos - 39) & 0x3F) >> 1];
-     upsampled[lr] = Reverb2244(src);
+     const int16 *src = &RUSB[lr][((RvbResPos >> 1) - 19) & 0x1F];
+     upsampled[lr] = src[9]; /* Reverb 2244 (Middle non-zero */
   }
  }
 
@@ -784,8 +747,8 @@ int32 PS_SPU::UpdateFromCDC(int32 clocks)
 
    while(clock_divider <= 0)
    {
-      clock_divider += 768;
-      sample_clocks++;
+      clock_divider += spu_samples*768;
+      sample_clocks += spu_samples;
    }
 
    while(sample_clocks > 0)
@@ -850,6 +813,11 @@ int32 PS_SPU::UpdateFromCDC(int32 clocks)
          voice->PreLRSample = 0;
 
          //PSX_WARNING("[SPU] Voice %d CurPhase=%08x, pitch=%04x, CurAddr=%08x", voice_num, voice->CurPhase, voice->Pitch, voice->CurAddr);
+
+         if(voice->DecodePlayDelay)
+         {
+            voice->IgnoreSampLA = false;
+         }
 
          //
          // Decode new samples if necessary.
@@ -943,14 +911,26 @@ int32 PS_SPU::UpdateFromCDC(int32 clocks)
          {
             if(voice->ADSR.Phase != ADSR_RELEASE)
             {
-               ReleaseEnvelope(voice);
+               // TODO/FIXME:
+               //  To fix all the missing notes in "Dragon Ball GT: Final Bout" music, !voice->DecodePlayDelay instead of
+               //  voice->DecodePlayDelay < 3 is necessary, but that would cause the length of time for which the voice off is
+               //  effectively ignored to be too long by about half a sample(rough test measurement).  That, combined with current
+               //  CPU and DMA emulation timing inaccuracies(execution generally too fast), creates a significant risk of regressions
+               //  in other games, so be very conservative for now.
+               //
+               //  Also, voice on should be ignored during the delay as well, but comprehensive tests are needed before implementing that
+               //  due to some effects that appear to occur repeatedly during the delay on a PS1 but are currently only emulated as
+               //  performed when the voice on is processed(e.g. curaddr = startaddr).
+               //
+               if(voice->DecodePlayDelay < 3)
+               {
+                  ReleaseEnvelope(voice);
+               }
             }
          }
 
          if(VoiceOn & (1U << voice_num))
          {
-            //printf("Voice On: %u\n", voice_num);
-
             ResetEnvelope(voice);
 
             voice->DecodeFlags = 0;
@@ -1068,7 +1048,6 @@ int32 PS_SPU::UpdateFromCDC(int32 clocks)
 
 void PS_SPU::WriteDMA(uint32 V)
 {
-   //SPUIRQ_DBG("DMA Write, RWAddr after=0x%06x", RWAddr);
    WriteSPURAM(RWAddr, V);
    RWAddr = (RWAddr + 1) & 0x3FFFF;
 
@@ -1089,7 +1068,6 @@ uint32 PS_SPU::ReadDMA(void)
 
    CheckIRQAddr(RWAddr);
 
-   //SPUIRQ_DBG("DMA Read, RWAddr after=0x%06x", RWAddr);
 
    return(ret);
 }
@@ -1103,7 +1081,6 @@ void PS_SPU::Write(int32_t timestamp, uint32 A, uint16 V)
 
    if(A >= 0x200)
    {
-      //printf("Write: %08x %04x\n", A, V);
       if(A < 0x260)
       {
          SPU_Voice *voice = &Voices[(A - 0x200) >> 2];
@@ -1147,12 +1124,6 @@ void PS_SPU::Write(int32_t timestamp, uint32 A, uint16 V)
          case 0x0E:
             voice->LoopAddr = (V << 2) & 0x3FFFF;
             voice->IgnoreSampLA = true;
-#if 0
-            if((voice - Voices) == 22)
-            {
-               SPUIRQ_DBG("Manual loop address setting for voice %d: %04x", (int)(voice - Voices), V);
-            }
-#endif
             break;
       }
    }
@@ -1228,13 +1199,11 @@ void PS_SPU::Write(int32_t timestamp, uint32 A, uint16 V)
          case 0x24:
                     IRQAddr = (V << 2) & 0x3FFFF;
                     CheckIRQAddr(RWAddr);
-                    //SPUIRQ_DBG("Set IRQAddr=0x%06x", IRQAddr);
                     break;
 
          case 0x26:
                     RWAddr = (V << 2) & 0x3FFFF;	      
                     CheckIRQAddr(RWAddr);
-                    //SPUIRQ_DBG("Set RWAddr=0x%06x", RWAddr);
                     break;
 
          case 0x28: WriteSPURAM(RWAddr, V);
@@ -1242,12 +1211,9 @@ void PS_SPU::Write(int32_t timestamp, uint32 A, uint16 V)
                     CheckIRQAddr(RWAddr);
                     break;
 
-         case 0x2A: //if((SPUControl & 0x80) && !(V & 0x80))
-                    // printf("\n\n\n\n ************** REVERB PROCESSING DISABLED\n\n\n\n");
+         case 0x2A: 
 
                     SPUControl = V;
-                    //SPUIRQ_DBG("Set SPUControl=0x%04x -- IRQA=%06x, RWA=%06x", V, IRQAddr, RWAddr);
-                    //printf("SPU control write: %04x\n", V);
                     if(!(V & 0x40))
                     {
                        IRQAsserted = false;
@@ -1285,16 +1251,11 @@ uint16 PS_SPU::Read(int32_t timestamp, uint32 A)
 {
    A &= 0x3FF;
 
-   //PSX_DBGINFO("[SPU] Read: %08x", A);
-
    if(A >= 0x200)
    {
       if(A < 0x260)
       {
          SPU_Voice *voice = &Voices[(A - 0x200) >> 2];
-
-         //printf("Read: %08x %04x\n", A, voice->Sweep[(A & 2) >> 1].ReadVolume());
-
          return voice->Sweep[(A & 2) >> 1].ReadVolume();
       }
       else if(A < 0x280)
@@ -1491,8 +1452,8 @@ int PS_SPU::StateAction(StateMem *sm, int load, int data_only)
          Voices[i].LoopAddr &= 0x3FFFF;
       }
 
-      if(clock_divider <= 0 || clock_divider > 768)
-         clock_divider = 768;
+      if(clock_divider <= 0 || clock_divider > spu_samples*768)
+         clock_divider = spu_samples*768;
 
       RWAddr &= 0x3FFFF;
       CWA &= 0x1FF;

@@ -1,6 +1,5 @@
 #include "rsx_lib_gl.h"
 
-#include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h> /* exit() */
@@ -62,7 +61,7 @@
 #include "libretro.h"
 #include "libretro_options.h"
 
-#if 0 || defined(__APPLE__)
+#if 0 || defined(__APPLE__) || defined(HAVE_OPENGLES3)
 #define NEW_COPY_RECT
 static const GLushort indices[6] = {0, 1, 2, 2, 1, 3};
 #else
@@ -320,11 +319,14 @@ struct GlRenderer {
    /* Display Mode - GP1(08h) */
    enum width_modes curr_width_mode;
 
-   /* When true we perform no horizontal padding */
-   bool crop_overscan;
+   /* When set we perform no horizontal padding */
+   int crop_overscan;
 
    /* Experimental offset feature */
    int32_t image_offset_cycles;
+
+   /* Image Crop option */
+   unsigned image_crop;
 
    /* Scanline core options */
    int32_t initial_scanline;
@@ -360,6 +362,7 @@ static RetroGl static_renderer;
 static bool has_software_fb = false;
 
 extern "C" unsigned char widescreen_hack;
+extern "C" unsigned char widescreen_hack_aspect_ratio_setting;
 extern "C" bool content_is_pal;
 extern "C" int aspect_ratio_setting;
 
@@ -395,12 +398,14 @@ static void get_error(const char *msg)
       case GL_OUT_OF_MEMORY:
          log_cb(RETRO_LOG_ERROR, "GL error flag: GL_OUT_OF_MEMORY [%s]\n", msg);
          break;
+#ifndef __APPLE__
       case GL_STACK_UNDERFLOW:
          log_cb(RETRO_LOG_ERROR, "GL error flag: GL_STACK_UNDERFLOW [%s]\n", msg);
          break;
       case GL_STACK_OVERFLOW:
          log_cb(RETRO_LOG_ERROR, "GL error flag: GL_STACK_OVERFLOW [%s]\n", msg);
          break;
+#endif
       case GL_INVALID_OPERATION:
          log_cb(RETRO_LOG_ERROR, "GL error flag: GL_INVALID_OPERATION [%s]\n", msg);
          break;
@@ -703,7 +708,13 @@ static void DrawBuffer_map__no_bind(DrawBuffer<T> *drawbuffer)
          offset_bytes,
          buffer_size,
          GL_MAP_WRITE_BIT |
-         GL_MAP_INVALIDATE_RANGE_BIT);
+#ifdef EMSCRIPTEN
+         // in emscripten, glMapBufferRange is only supported when access is MAP_WRITE|INVALIDATE_BUFFER
+         GL_MAP_INVALIDATE_BUFFER_BIT
+#else
+         GL_MAP_INVALIDATE_RANGE_BIT
+#endif
+         );
 
    assert(m != NULL);
 
@@ -796,6 +807,7 @@ static void DrawBuffer_bind_attributes(DrawBuffer<T> *drawbuffer)
                   element_size,
                   (GLvoid*)attr.offset);
             break;
+#ifndef HAVE_OPENGLES3
          case GL_DOUBLE:
             glVertexAttribLPointer( index,
                   attr.components,
@@ -803,6 +815,7 @@ static void DrawBuffer_bind_attributes(DrawBuffer<T> *drawbuffer)
                   element_size,
                   (GLvoid*)attr.offset);
             break;
+#endif
       }
    }
 }
@@ -882,10 +895,18 @@ static void Framebuffer_init(struct Framebuffer *fb,
 
    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb->id);
 
+#ifdef HAVE_OPENGLES3
+   glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER,
+                           GL_COLOR_ATTACHMENT0,
+                           GL_TEXTURE_2D,
+                           color_texture->id,
+                           0);
+#else
    glFramebufferTexture(   GL_DRAW_FRAMEBUFFER,
                            GL_COLOR_ATTACHMENT0,
                            color_texture->id,
                            0);
+#endif
 
    GLenum col_attach_0 = GL_COLOR_ATTACHMENT0;
 
@@ -980,10 +1001,18 @@ static void GlRenderer_draw(GlRenderer *renderer)
    /* Bind the out framebuffer */
    Framebuffer_init(&_fb, &renderer->fb_out);
 
+#ifdef HAVE_OPENGLES3
+   glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER,
+         GL_DEPTH_STENCIL_ATTACHMENT,
+         GL_TEXTURE_2D,
+         renderer->fb_out_depth.id,
+         0);
+#else
    glFramebufferTexture(   GL_DRAW_FRAMEBUFFER,
          GL_DEPTH_STENCIL_ATTACHMENT,
          renderer->fb_out_depth.id,
          0);
+#endif
 
    glClear(GL_DEPTH_BUFFER_BIT);
 
@@ -1114,7 +1143,19 @@ static void GlRenderer_upload_textures(
          (GLsizei) dimensions[0],
          (GLsizei) dimensions[1],
          GL_RGBA,
+#ifdef HAVE_OPENGLES3
+         GL_UNSIGNED_SHORT_5_5_5_1,
+         // bits are always in the order that they show
+         // REV indicates the channels are in reversed order
+         // RGBA
+         // 16 bit unsigned short: R5 G5 B5 A1
+         // RRRRRGGGGGBBBBBA
+#else
          GL_UNSIGNED_SHORT_1_5_5_5_REV,
+         // ABGR
+         // 16 bit unsigned short: A1 B5 G5 R5
+         // ABBBBBGGGGGRRRRR
+#endif
          (void*)pixel_buffer);
 
    uint16_t x_start    = top_left[0];
@@ -1149,7 +1190,9 @@ static void GlRenderer_upload_textures(
 
    glDisable(GL_SCISSOR_TEST);
    glDisable(GL_BLEND);
+#ifndef HAVE_OPENGLES3
    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+#endif
 
    /* Bind the output framebuffer */
    Framebuffer _fb;
@@ -1158,7 +1201,9 @@ static void GlRenderer_upload_textures(
    if (!DRAWBUFFER_IS_EMPTY(renderer->image_load_buffer))
       DrawBuffer_draw(renderer->image_load_buffer, GL_TRIANGLE_STRIP);
 
+#ifndef HAVE_OPENGLES3
    glPolygonMode(GL_FRONT_AND_BACK, renderer->command_polygon_mode);
+#endif
    glEnable(GL_SCISSOR_TEST);
 
 #ifdef DEBUG
@@ -1226,13 +1271,15 @@ static bool GlRenderer_new(GlRenderer *renderer, DrawConfig config)
    get_variables(&upscaling, &display_vram);
 
    var.key = BEETLE_OPT(crop_overscan);
-   bool crop_overscan = true;
+   int crop_overscan = true;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
-      if (!strcmp(var.value, "enabled"))
-         crop_overscan = true;
-      else if (!strcmp(var.value, "disabled"))
-         crop_overscan = false;
+      if (strcmp(var.value, "disabled") == 0)
+         crop_overscan = 0;
+      else if (strcmp(var.value, "static") == 0)
+         crop_overscan = 1;
+      else if (strcmp(var.value, "smart") == 0)
+         crop_overscan = 2;
    }
 
    int32_t image_offset_cycles = 0;
@@ -1240,6 +1287,16 @@ static bool GlRenderer_new(GlRenderer *renderer, DrawConfig config)
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
       image_offset_cycles = atoi(var.value);
+   }
+
+   unsigned image_crop = 0;
+   var.key = BEETLE_OPT(image_crop);
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (strcmp(var.value, "disabled") == 0)
+         image_crop = 0;
+      else
+         image_crop = atoi(var.value);
    }
 
    int32_t initial_scanline = 0;
@@ -1389,7 +1446,9 @@ static bool GlRenderer_new(GlRenderer *renderer, DrawConfig config)
       DrawBuffer_enable_attribute(command_buffer, "dither");
    }
 
+#ifndef HAVE_OPENGLES3
    GLenum command_draw_mode = wireframe ? GL_LINE : GL_FILL;
+#endif
 
    if (command_buffer->program)
    {
@@ -1430,7 +1489,9 @@ static bool GlRenderer_new(GlRenderer *renderer, DrawConfig config)
    renderer->vertex_index_pos = 0;
    renderer->command_draw_mode = GL_TRIANGLES;
    renderer->semi_transparency_mode =  SemiTransparencyMode_Average;
+#ifndef HAVE_OPENGLES3
    renderer->command_polygon_mode = command_draw_mode;
+#endif
    renderer->output_buffer = output_buffer;
    renderer->image_load_buffer = image_load_buffer;
    renderer->config = config;
@@ -1440,6 +1501,7 @@ static bool GlRenderer_new(GlRenderer *renderer, DrawConfig config)
    renderer->internal_color_depth = depth;
    renderer->crop_overscan = crop_overscan;
    renderer->image_offset_cycles = image_offset_cycles;
+   renderer->image_crop = image_crop;
    renderer->curr_width_mode = WIDTH_MODE_320;
    renderer->initial_scanline = initial_scanline;
    renderer->last_scanline = last_scanline;
@@ -1570,10 +1632,16 @@ static GlDisplayRect compute_gl_display_rect(GlRenderer *renderer)
    int32_t x;
    if (renderer->crop_overscan)
    {
-      width = (uint32_t) (2560/clock_div);
+      width = (uint32_t) ((2560/clock_div) - renderer->image_crop);
       int32_t offset_cycles = renderer->image_offset_cycles;
       int32_t h_start = (int32_t) renderer->config.display_area_hrange[0];
-      x = floor((h_start - 608 + offset_cycles) / (double) clock_div);
+      /* Restore old center behaviour is render_state.horiz_start is intentionally very high.
+       * 938 fixes Gunbird (1008) and Mobile Light Force (EU release of Gunbird),
+       * but this value should be lowerer in the future if necessary. */
+      if ((renderer->config.display_area_hrange[0] < 938) && (renderer->crop_overscan == 2))
+          x = floor((offset_cycles / (double) clock_div) - (renderer->image_crop / 2));
+      else
+          x = floor(((h_start - 608 + offset_cycles) / (double) clock_div) - (renderer->image_crop / 2));
    }
    else
    {
@@ -1585,17 +1653,35 @@ static GlDisplayRect compute_gl_display_rect(GlRenderer *renderer)
 
    uint32_t height;
    int32_t y;
-   if (renderer->config.is_pal)
+   if (renderer->crop_overscan == 2)
    {
-      int h = renderer->last_scanline_pal - renderer->initial_scanline_pal + 1;
-      height = (h < 0 ? 0 : (uint32_t) h);
-      y = (308 - renderer->config.display_area_vrange[1]) + (renderer->last_scanline_pal - 287);
+        if (renderer->config.is_pal)
+        {
+            int h = (renderer->config.display_area_vrange[1] - renderer->config.display_area_vrange[0]) - (287 - renderer->last_scanline_pal) - renderer->initial_scanline_pal;
+            height = (h < 0 ? 0 : (uint32_t) h);
+            y = renderer->last_scanline_pal - 287;
+        }
+        else
+        {
+            int h = (renderer->config.display_area_vrange[1] - renderer->config.display_area_vrange[0]) - (239 - renderer->last_scanline) - renderer->initial_scanline;
+            height = (h < 0 ? 0 : (uint32_t) h);
+            y = renderer->last_scanline - 239;
+        }
    }
-   else
+   if (renderer->crop_overscan != 2 || height > (renderer->config.is_pal? 288 : 240))
    {
-      int h = renderer->last_scanline - renderer->initial_scanline + 1;
-      height = (h < 0 ? 0 : (uint32_t) h);
-      y = (256 - renderer->config.display_area_vrange[1]) + (renderer->last_scanline - 239);
+        if (renderer->config.is_pal)
+        {
+            int h = renderer->last_scanline_pal - renderer->initial_scanline_pal + 1;
+            height = (h < 0 ? 0 : (uint32_t) h);
+            y = (308 - renderer->config.display_area_vrange[1]) + (renderer->last_scanline_pal - 287);
+        }
+        else
+        {
+            int h = renderer->last_scanline - renderer->initial_scanline + 1;
+            height = (h < 0 ? 0 : (uint32_t) h);
+            y = (256 - renderer->config.display_area_vrange[1]) + (renderer->last_scanline - 239);
+        }
    }
    height *= (renderer->config.is_480i ? 2 : 1);
    y *= (renderer->config.is_480i ? 2 : 1);
@@ -1667,7 +1753,8 @@ static void bind_libretro_framebuffer(GlRenderer *renderer)
                                                                            renderer->initial_scanline,
                                                           content_is_pal ? renderer->last_scanline_pal :
                                                                            renderer->last_scanline,
-                                                          aspect_ratio_setting, renderer->display_vram, widescreen_hack);
+                                                          aspect_ratio_setting, renderer->display_vram, widescreen_hack,
+                                                          widescreen_hack_aspect_ratio_setting);
 
       environ_cb(RETRO_ENVIRONMENT_SET_GEOMETRY, &geometry);
 
@@ -1704,13 +1791,15 @@ static bool retro_refresh_variables(GlRenderer *renderer)
    get_variables(&upscaling, &display_vram);
 
    var.key = BEETLE_OPT(crop_overscan);
-   bool crop_overscan = true;
+   int crop_overscan = 1;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
-      if (!strcmp(var.value, "enabled"))
-         crop_overscan = true;
-      else if (!strcmp(var.value, "disabled"))
-         crop_overscan = false;
+      if (strcmp(var.value, "disabled") == 0)
+         crop_overscan = 0;
+      else if (strcmp(var.value, "static") == 0)
+         crop_overscan = 1;
+      else if (strcmp(var.value, "smart") == 0)
+         crop_overscan = 2;
    }
 
    int32_t image_offset_cycles;
@@ -1718,6 +1807,16 @@ static bool retro_refresh_variables(GlRenderer *renderer)
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
       image_offset_cycles = atoi(var.value);
+   }
+   
+   unsigned image_crop;
+   var.key = BEETLE_OPT(image_crop);
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (strcmp(var.value, "disabled") == 0)
+         image_crop = 0;
+      else
+         image_crop = atoi(var.value);
    }
 
    int32_t initial_scanline = 0;
@@ -1864,7 +1963,9 @@ static bool retro_refresh_variables(GlRenderer *renderer)
       glUniform1ui(renderer->command_buffer->program->uniforms["dither_scaling"], dither_scaling);
    }
 
+#ifndef HAVE_OPENGLES3
    renderer->command_polygon_mode = wireframe ? GL_LINE : GL_FILL;
+#endif
 
    glLineWidth((GLfloat) upscaling);
 
@@ -1882,6 +1983,7 @@ static bool retro_refresh_variables(GlRenderer *renderer)
    renderer->filter_type            = filter;
    renderer->crop_overscan          = crop_overscan;
    renderer->image_offset_cycles    = image_offset_cycles;
+   renderer->image_crop             = image_crop;
    renderer->initial_scanline       = initial_scanline;
    renderer->last_scanline          = last_scanline;
    renderer->initial_scanline_pal   = initial_scanline_pal;
@@ -2212,16 +2314,17 @@ extern "C" bool currently_interlaced;
 static struct retro_system_av_info get_av_info(VideoClock std)
 {
    struct retro_system_av_info info;
-   unsigned int max_width    = 0;
-   unsigned int max_height   = 0;
-   uint8_t upscaling         = 1;
-   bool widescreen_hack      = false;
-   bool display_vram         = false;
-   bool crop_overscan        = false;
-   int initial_scanline_ntsc = 0;
-   int last_scanline_ntsc    = 239;
-   int initial_scanline_pal  = 0;
-   int last_scanline_pal     = 287;
+   unsigned int max_width                   = 0;
+   unsigned int max_height                  = 0;
+   uint8_t upscaling                        = 1;
+   bool widescreen_hack                     = false;
+   int widescreen_hack_aspect_ratio_setting = 1;
+   bool display_vram                        = false;
+   int crop_overscan                        = 0;
+   int initial_scanline_ntsc                = 0;
+   int last_scanline_ntsc                   = 239;
+   int initial_scanline_pal                 = 0;
+   int last_scanline_pal                    = 287;
 
    /* This function currently queries core options rather than
       checking GlRenderer state; possible to refactor? */
@@ -2237,11 +2340,34 @@ static struct retro_system_av_info get_av_info(VideoClock std)
          widescreen_hack = true;
    }
 
+   var.key = BEETLE_OPT(widescreen_hack_aspect_ratio);
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (!strcmp(var.value, "16:10"))
+         widescreen_hack_aspect_ratio_setting = 0;
+      else if (!strcmp(var.value, "16:9"))
+         widescreen_hack_aspect_ratio_setting = 1;
+      else if (!strcmp(var.value, "18:9"))
+         widescreen_hack_aspect_ratio_setting = 2;
+      else if (!strcmp(var.value, "19:9"))
+         widescreen_hack_aspect_ratio_setting = 3;
+      else if (!strcmp(var.value, "20:9"))
+         widescreen_hack_aspect_ratio_setting = 4;
+      else if (!strcmp(var.value, "21:9"))
+         widescreen_hack_aspect_ratio_setting = 5;
+      else if (!strcmp(var.value, "32:9"))
+         widescreen_hack_aspect_ratio_setting = 6;
+   }
+
    var.key = BEETLE_OPT(crop_overscan);
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
-      if (!strcmp(var.value, "enabled"))
-         crop_overscan = true;
+      if (strcmp(var.value, "disabled") == 0)
+         crop_overscan = 0;
+      else if (strcmp(var.value, "static") == 0)
+         crop_overscan = 1;
+      else if (strcmp(var.value, "smart") == 0)
+         crop_overscan = 2;
    }
 
    var.key = BEETLE_OPT(initial_scanline);
@@ -2291,7 +2417,8 @@ static struct retro_system_av_info get_av_info(VideoClock std)
    info.geometry.aspect_ratio = rsx_common_get_aspect_ratio(std, crop_overscan,
                                                             std ? initial_scanline_pal : initial_scanline_ntsc,
                                                             std ? last_scanline_pal : last_scanline_ntsc,
-                                                            aspect_ratio_setting, display_vram, widescreen_hack);
+                                                            aspect_ratio_setting, display_vram, widescreen_hack,
+                                                            widescreen_hack_aspect_ratio_setting);
 
    info.timing.fps = rsx_common_get_timing_fps();
    info.timing.sample_rate = SOUND_FREQUENCY;
@@ -2400,7 +2527,9 @@ void rsx_gl_prepare_frame(void)
    /* In case we're upscaling we need to increase the line width
     * proportionally */
    glLineWidth((GLfloat)renderer->internal_upscaling);
+#ifndef HAVE_OPENGLES3
    glPolygonMode(GL_FRONT_AND_BACK, renderer->command_polygon_mode);
+#endif
    glEnable(GL_SCISSOR_TEST);
    glEnable(GL_DEPTH_TEST);
    glDepthFunc(GL_LEQUAL);
@@ -2489,7 +2618,9 @@ void rsx_gl_finalize_frame(const void *fb, unsigned width,
    bind_libretro_framebuffer(renderer);
 
    glDisable(GL_SCISSOR_TEST);
+#ifndef HAVE_OPENGLES3
    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+#endif
    glDisable(GL_DEPTH_TEST);
    glDisable(GL_BLEND);
 
@@ -2583,7 +2714,9 @@ void rsx_gl_finalize_frame(const void *fb, unsigned width,
 
       glDisable(GL_SCISSOR_TEST);
       glDisable(GL_BLEND);
+#ifndef HAVE_OPENGLES3
       glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+#endif
 
       Framebuffer_init(&_fb, &renderer->fb_texture);
 
@@ -3105,7 +3238,11 @@ void rsx_gl_load_image(
          dimensions,
          (size_t) VRAM_WIDTH_PIXELS,
          GL_RGBA,
+#ifdef HAVE_OPENGLES3
+         GL_UNSIGNED_SHORT_5_5_5_1,
+#else
          GL_UNSIGNED_SHORT_1_5_5_5_REV,
+#endif
          vram);
 
    uint16_t x_start    = top_left[0];
@@ -3137,7 +3274,9 @@ void rsx_gl_load_image(
 
    glDisable(GL_SCISSOR_TEST);
    glDisable(GL_BLEND);
+#ifndef HAVE_OPENGLES3
    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+#endif
 
    /* Bind the output framebuffer */
    Framebuffer_init(&_fb, &renderer->fb_out);
@@ -3145,7 +3284,9 @@ void rsx_gl_load_image(
    if (!DRAWBUFFER_IS_EMPTY(renderer->image_load_buffer))
       DrawBuffer_draw(renderer->image_load_buffer, GL_TRIANGLE_STRIP);
 
+#ifndef HAVE_OPENGLES3
    glPolygonMode(GL_FRONT_AND_BACK, renderer->command_polygon_mode);
+#endif
    glEnable(GL_SCISSOR_TEST);
 
 #ifdef DEBUG
@@ -3202,10 +3343,18 @@ void rsx_gl_fill_rect(
       Framebuffer _fb;
       Framebuffer_init(&_fb, &renderer->fb_out);
 
+#ifdef HAVE_OPENGLES3
+      glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,
+            GL_DEPTH_STENCIL_ATTACHMENT,
+            GL_TEXTURE_2D,
+            renderer->fb_out_depth.id,
+            0);
+#else
       glFramebufferTexture(GL_DRAW_FRAMEBUFFER,
             GL_DEPTH_STENCIL_ATTACHMENT,
             renderer->fb_out_depth.id,
             0);
+#endif
 
       glClearColor(   (float) col[0] / 255.0,
             (float) col[1] / 255.0,
@@ -3281,10 +3430,18 @@ void rsx_gl_copy_rect(
 
    glGenFramebuffers(1, &fb);
    glBindFramebuffer(GL_READ_FRAMEBUFFER, fb);
+#ifdef HAVE_OPENGLES3
+   glFramebufferTexture2D(GL_READ_FRAMEBUFFER,
+         GL_COLOR_ATTACHMENT0,
+         GL_TEXTURE_2D,
+         renderer->fb_out.id,
+         0);
+#else
    glFramebufferTexture(GL_READ_FRAMEBUFFER,
          GL_COLOR_ATTACHMENT0,
          renderer->fb_out.id,
          0);
+#endif
 
    glReadBuffer(GL_COLOR_ATTACHMENT0);
 
@@ -3292,6 +3449,7 @@ void rsx_gl_copy_rect(
     * GL_TEXTURE_2D? Something tells me this is undefined
     * behaviour. I could use glReadPixels and glWritePixels instead
     * or something like that. */
+   /* former seems to work just fine on GLES 3.0 */
    glBindTexture(GL_TEXTURE_2D, renderer->fb_out.id);
    glCopyTexSubImage2D( GL_TEXTURE_2D, 0, new_dst_x, new_dst_y,
                         new_src_x, new_src_y, new_w, new_h);

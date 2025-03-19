@@ -40,6 +40,9 @@ class PS_CDC
       void GetCDAudio(int32 samples[2], const unsigned freq);
 
       CD_Audio_Buffer AudioBuffer;
+#ifdef __LIBRETRO__
+      int DriveStatus;
+#endif
 
    private:
       CDIF *Cur_CDIF;
@@ -71,7 +74,7 @@ class PS_CDC
       uint8 ResultsWP;	// Write position, 4 bit(0 ... 15).
       uint8 ResultsRP;	// Read position, 4 bit(0 ... 15).
 
-      SimpleFIFO<uint8> DMABuffer;
+      SimpleFIFO DMABuffer;
       uint8 SB[2340];
       uint32 SB_In;
 
@@ -152,7 +155,9 @@ class PS_CDC
          DS_READING,
          DS_RESETTING
       };
+#ifndef __LIBRETRO__
       int DriveStatus;
+#endif
       int StatusAfterSeek;
       bool Forward;
       bool Backward;

@@ -19,6 +19,7 @@
 #include "../frontio.h"
 #include "dualshock.h"
 
+#include "../../mednafen.h"
 #include "../../mednafen-endian.h"
 
 /*
@@ -148,13 +149,23 @@ void InputDevice_DualShock::ResetTS(void)
    lastts = 0;
 }
 
+#ifdef __LIBRETRO__
+extern bool setting_apply_analog_default;
+#endif
+
 void InputDevice_DualShock::SetAMCT(bool enabled)
 {
+   bool amct_prev_info = amct_enabled;
    amct_enabled = enabled;
    if(amct_enabled)
-      analog_mode = false;
+      analog_mode = setting_apply_analog_default;
    else
       analog_mode = true;
+
+   if (amct_prev_info == analog_mode && amct_prev_info == amct_enabled)
+      return;
+
+   am_prev_info = analog_mode;
 
    MDFN_DispMessage(2, RETRO_LOG_INFO,
          RETRO_MESSAGE_TARGET_OSD, RETRO_MESSAGE_TYPE_NOTIFICATION_ALT,
@@ -173,11 +184,11 @@ void InputDevice_DualShock::CheckManualAnaModeChange(void)
 
       if(amct_enabled)
       {
-         if(buttons[0] == 0x09 && buttons[1] == 0x0f)
+         if(buttons[0] == analog_combo[0] && buttons[1] == analog_combo[1])
          {
             if(combo_anatoggle_counter == -1)
                combo_anatoggle_counter = 0;
-            else if(combo_anatoggle_counter >= (44100 * 768))
+            else if(combo_anatoggle_counter >= (44100 * (768 * HOLD)))
             {
                need_mode_toggle = true;
                combo_anatoggle_counter = -2;
@@ -200,7 +211,7 @@ void InputDevice_DualShock::CheckManualAnaModeChange(void)
          if(analog_mode_locked)
             MDFN_DispMessage(2, RETRO_LOG_INFO,
                   RETRO_MESSAGE_TARGET_OSD, RETRO_MESSAGE_TYPE_NOTIFICATION_ALT,
-                  "%s: 2 Analog toggle is DISABLED, sticks are %s",
+                  "%s: Analog toggle is DISABLED, sticks are %s",
                   gp_name.c_str(), analog_mode ? "ON" : "OFF");
          else
             analog_mode = !analog_mode;
@@ -234,6 +245,7 @@ void InputDevice_DualShock::Power(void)
    transmit_pos = 0;
    transmit_count = 0;
 
+   analog_mode = true;
    analog_mode_locked = false;
 
    mad_munchkins = false;

@@ -25,6 +25,8 @@
 #include "cpu.h"
 
 #include "../state_helpers.h"
+#include "../math_ops.h"
+#include "../mednafen.h"
 #include "../mednafen-endian.h"
 
 // iCB: PGXP STUFF
@@ -34,16 +36,16 @@
 int pgxpMode = PGXP_GetModes();
 
 #ifdef HAVE_LIGHTREC
- #include <lightrec.h>
- #include <stdio.h>
- #include <unistd.h>
- #include <signal.h>
+#include <lightrec.h>
+#include <unistd.h>
+#include <signal.h>
 
 enum DYNAREC prev_dynarec;
 bool prev_invalidate;
 extern bool psx_dynarec_invalidate;
 extern uint8 psx_mmap;
 static struct lightrec_state *lightrec_state;
+uint8 next_interpreter;
 #endif
 
 extern bool psx_gte_overclock;
@@ -54,12 +56,6 @@ bool PS_CPU::Halted;
 struct PS_CPU::CP0 PS_CPU::CP0;
 char PS_CPU::cache_buf[64 * 1024];
 
-#if 0
- #define EXP_ILL_CHECK(n) {n;}
-#else
- #define EXP_ILL_CHECK(n) {}
-#endif
-
 #define BIU_ENABLE_ICACHE_S1	0x00000800	// Enable I-cache, set 1
 #define BIU_ICACHE_FSIZE_MASK	0x00000300      // I-cache fill size mask; 0x000 = 2 words, 0x100 = 4 words, 0x200 = 8 words, 0x300 = 16 words
 #define BIU_ENABLE_DCACHE	0x00000080	// Enable D-cache
@@ -68,17 +64,8 @@ char PS_CPU::cache_buf[64 * 1024];
 #define BIU_INVALIDATE_MODE	0x00000002	// Enable Invalidate mode(IsC must be set to 1 as well presumably?)
 #define BIU_LOCK_MODE		0x00000001	// Enable Lock mode(IsC must be set to 1 as well presumably?)
 
-
-#if NOT_LIBRETRO
-namespace MDFN_IEN_PSX
-{
-#endif
-
-
 PS_CPU::PS_CPU()
 {
- //printf("%zu\n", (size_t)((uintptr_t)ICache - (uintptr_t)this));
-
    addr_mask[0] = 0xFFFFFFFF;
    addr_mask[1] = 0xFFFFFFFF;
    addr_mask[2] = 0xFFFFFFFF;
@@ -192,6 +179,7 @@ void PS_CPU::Power(void)
  PGXP_Init();
 
 #ifdef HAVE_LIGHTREC
+ next_interpreter = 0;
  prev_dynarec = psx_dynarec;
  prev_invalidate = psx_dynarec_invalidate;
  pgxpMode = PGXP_GetModes();
@@ -255,9 +243,22 @@ int PS_CPU::StateAction(StateMem *sm, const unsigned load, const bool data_only)
  {
 #ifdef HAVE_LIGHTREC
   if(psx_dynarec != DYNAREC_DISABLED) {
-   if(lightrec_state)
-    lightrec_invalidate_all(lightrec_state);
-   else
+   if(lightrec_state) {
+    /* Hack to prevent Dynarec + Runahead from causing a crash by
+     * switching to lightrec interpreter after load state in bios */
+    if(psx_dynarec != DYNAREC_RUN_INTERPRETER &&
+       BACKED_PC >= 0xBFC00000 && BACKED_PC <= 0xBFC80000) {
+     if(next_interpreter == 0) {
+      log_cb(RETRO_LOG_INFO, "PC 0x%08x Dynarec using interpreter for a few "
+                             "frames, avoid crash due to Runahead\n",BACKED_PC);
+      lightrec_plugin_init();
+     }
+     /* run lightrec's interpreter for a few frames
+      * 76 for NTSC, 93 for PAL seems to prevent crash at max runahead */
+     next_interpreter = 93;
+    } else
+     lightrec_invalidate_all(lightrec_state);
+   }else
     lightrec_plugin_init();
   }
 #endif
@@ -316,8 +317,6 @@ void PS_CPU::SetBIU(uint32 val)
     ICache[i].TV |= 0x1;
   }
  }
-
- PSX_DBG(PSX_DBG_SPARSE, "[CPU] Set BIU=0x%08x\n", BIU);
 }
 
 uint32 PS_CPU::GetBIU(void)
@@ -607,19 +606,6 @@ uint32 NO_INLINE PS_CPU::Exception(uint32 code, uint32 PC, const uint32 NP, cons
 
  assert(code < 16);
 
-#ifdef DEBUG
- if(code != EXCEPTION_INT && code != EXCEPTION_BP && code != EXCEPTION_SYSCALL)
- {
-  static const char* exmne[16] =
-  {
-   "INT", "MOD", "TLBL", "TLBS", "ADEL", "ADES", "IBE", "DBE", "SYSCALL", "BP", "RI", "COPU", "OV", NULL, NULL, NULL
-  };
-
-  PSX_DBG(PSX_DBG_WARNING, "[CPU] Exception %s(0x%02x) @ PC=0x%08x(NP=0x%08x, BDBT=0x%02x), Instr=0x%08x, IPCache=0x%02x, CAUSE=0x%08x, SR=0x%08x, IRQC_Status=0x%04x, IRQC_Mask=0x%04x\n",
-	exmne[code], code, PC, NP, BDBT, instr, IPCache, CP0.CAUSE, CP0.SR, IRQ_GetRegister(IRQ_GSREG_STATUS, NULL, 0), IRQ_GetRegister(IRQ_GSREG_MASK, NULL, 0));
- }
-#endif
-
  if(CP0.SR & (1 << 22))	// BEV
   handler = 0xBFC00180;
 
@@ -666,10 +652,9 @@ uint32 NO_INLINE PS_CPU::Exception(uint32 code, uint32 PC, const uint32 NP, cons
 	BACKED_LDValue = LDValue;
 
 //
-// Should come before DO_LDS() so the EXP_ILL_CHECK() emulator debugging macro in GPR_DEP() will work properly.
 //
 #define GPR_DEPRES_BEGIN { uint8 back = ReadAbsorb[0];
-#define GPR_DEP(n) { unsigned tn = (n); ReadAbsorb[tn] = 0; EXP_ILL_CHECK(if(LDWhich > 0 && LDWhich < 0x20 && LDWhich == tn) { PSX_DBG(PSX_DBG_WARNING, "[CPU] Instruction at PC=0x%08x in load delay slot has dependency on load target register(0x%02x): SR=0x%08x\n", PC, LDWhich, CP0.SR); }) }
+#define GPR_DEP(n) { unsigned tn = (n); ReadAbsorb[tn] = 0; }
 #define GPR_RES(n) { unsigned tn = (n); ReadAbsorb[tn] = 0; }
 #define GPR_DEPRES_END ReadAbsorb[0] = back; }
 
@@ -721,19 +706,6 @@ pscpu_timestamp_t PS_CPU::RunReal(pscpu_timestamp_t timestamp_in)
     muldiv_ts_done += timestamp;
 
     BACKING_TO_ACTIVE;
-   }
-#endif
-
-#if NOT_LIBRETRO
-   if(BIOSPrintMode)
-   {
-    if(PC == 0xB0)
-    {
-     if(MDFN_UNLIKELY(GPR[9] == 0x3D))
-     {
-      PSX_DBG_BIOS_PUTC(GPR[4]);
-     }
-    }
    }
 #endif
 
@@ -798,9 +770,6 @@ pscpu_timestamp_t PS_CPU::RunReal(pscpu_timestamp_t timestamp_in)
 	 const uint32 offset = (arg_offset);			\
 	 const uint32 mask = (arg_mask);			\
 	 const uint32 old_PC = PC;				\
-								\
-	 EXP_ILL_CHECK(if(BDBT) { PSX_DBG(PSX_DBG_WARNING, "[CPU] Branch instruction at PC=0x%08x in branch delay slot: SR=0x%08x\n", PC, CP0.SR);}) 	\
-								\
 	 PC = new_PC;						\
 	 new_PC += 4;						\
 	 BDBT = 2;						\
@@ -1196,7 +1165,6 @@ pscpu_timestamp_t PS_CPU::RunReal(pscpu_timestamp_t timestamp_in)
 		 default:
 			// Tested to be rather NOPish
 			DO_LDS();
-			PSX_DBG(PSX_DBG_WARNING, "[CPU] MFC0 from unmapped CP0 register %u.\n", rd);
 			break;
 		}
 		break;
@@ -1222,12 +1190,6 @@ pscpu_timestamp_t PS_CPU::RunReal(pscpu_timestamp_t timestamp_in)
 			break;
 
 		 case CP0REG_DCIC:
-#ifdef DEBUG
-			if(val)
-			{
-			 PSX_DBG(PSX_DBG_WARNING, "[CPU] Non-zero write to DCIC: 0x%08x\n", val);
-			}
-#endif
 			CP0.DCIC = val & 0xFF80003F;
 			break;
 
@@ -1258,11 +1220,6 @@ pscpu_timestamp_t PS_CPU::RunReal(pscpu_timestamp_t timestamp_in)
 		{
 		 const uint32 immediate = (int32)(int16)(instr & 0xFFFF);
 		 const bool result = (false == (bool)(instr & (1U << 16)));
-
-#ifdef DEBUG
-		 PSX_DBG(PSX_DBG_WARNING, "[CPU] BC0x instruction(0x%08x) @ PC=0x%08x\n", instr, PC);
-#endif
-
 		 DO_BRANCH(result, (immediate << 2), ~0U, false, 0);
 		}
 		break;
@@ -1384,11 +1341,6 @@ pscpu_timestamp_t PS_CPU::RunReal(pscpu_timestamp_t timestamp_in)
 		{
 		 const uint32 immediate = (int32)(int16)(instr & 0xFFFF);
 		 const bool result = (false == (bool)(instr & (1U << 16)));
-
-#ifdef DEBUG
-		 PSX_DBG(PSX_DBG_WARNING, "[CPU] BC2x instruction(0x%08x) @ PC=0x%08x\n", instr, PC);
-#endif
-
 		 DO_BRANCH(result, (immediate << 2), ~0U, false, 0);
 		}
 		break;
@@ -1417,11 +1369,6 @@ pscpu_timestamp_t PS_CPU::RunReal(pscpu_timestamp_t timestamp_in)
 	else
 	{
 	 const uint32 sub_op = (instr >> 21) & 0x1F;
-
-#ifdef DEBUG
-	 PSX_DBG(PSX_DBG_WARNING, "[CPU] COP%u instruction(0x%08x) @ PC=0x%08x\n", (instr >> 26) & 0x3, instr, PC);
-#endif
-
 	 if(sub_op == 0x08 || sub_op == 0x0C)
 	 {
 	  const uint32 immediate = (int32)(int16)(instr & 0xFFFF);
@@ -1453,13 +1400,7 @@ pscpu_timestamp_t PS_CPU::RunReal(pscpu_timestamp_t timestamp_in)
           new_PC = Exception(EXCEPTION_ADEL, PC, new_PC, instr);
 	 }
          else
-	 {
-#ifdef DEBUG
-	  PSX_DBG(PSX_DBG_WARNING, "[CPU] LWC%u instruction(0x%08x) @ PC=0x%08x\n", (instr >> 26) & 0x3, instr, PC);
-#endif
-
           ReadMemory<uint32>(timestamp, address, false, true);
-	 }
 	}
     END_OPF;
 
@@ -1512,13 +1453,6 @@ pscpu_timestamp_t PS_CPU::RunReal(pscpu_timestamp_t timestamp_in)
 	  CP0.BADA = address;
 	  new_PC = Exception(EXCEPTION_ADES, PC, new_PC, instr);
 	 }
-#ifdef DEBUG
-	 else
-	 {
-	  PSX_DBG(PSX_DBG_WARNING, "[CPU] SWC%u instruction(0x%08x) @ PC=0x%08x\n", (instr >> 26) & 0x3, instr, PC);
-	  //WriteMemory<uint32>(timestamp, address, SOMETHING);
-	 }
-#endif
 	}
     END_OPF;
 
@@ -2718,6 +2652,9 @@ pscpu_timestamp_t PS_CPU::Run(pscpu_timestamp_t timestamp_in, bool BIOSPrintMode
   prev_invalidate = psx_dynarec_invalidate;
  }
 
+ if(next_interpreter > 0)
+  next_interpreter--;
+
  if(psx_dynarec != DYNAREC_DISABLED)
   return(lightrec_plugin_execute(timestamp_in));
 #endif
@@ -2800,13 +2737,6 @@ uint32 PS_CPU::GetRegister(unsigned int which, char *special, const uint32 speci
 
   case GSREG_CAUSE:
 	ret = CP0.CAUSE;
-#ifdef NOT_LIBRETRO
-	if(special)
-	{
-	 trio_snprintf(special, special_len, "BD: %u, BT: %u, CE: %u, IP: 0x%02x, Sw: %u, ExcCode: 0x%01x",
-		(ret >> 31) & 1, (ret >> 30) & 1, (ret >> 28) & 3, (ret >> 10) & 0x3F, (ret >> 8) & 3, (ret >> 2) & 0xF);
-	}
-#endif
 	break;
 
   case GSREG_EPC:
@@ -3894,12 +3824,12 @@ int32_t PS_CPU::lightrec_plugin_execute(int32_t timestamp)
 		lightrec_restore_registers(lightrec_state, GPRL);
 		lightrec_reset_cycle_count(lightrec_state, timestamp);
 
-		if (psx_dynarec == DYNAREC_EXECUTE)
+		if (next_interpreter > 0 || psx_dynarec == DYNAREC_RUN_INTERPRETER)
+			PC = lightrec_run_interpreter(lightrec_state,PC);
+		else if (psx_dynarec == DYNAREC_EXECUTE)
 			PC = lightrec_execute(lightrec_state, PC, next_event_ts);
 		else if (psx_dynarec == DYNAREC_EXECUTE_ONE)
 			PC = lightrec_execute_one(lightrec_state,PC);
-		else if (psx_dynarec == DYNAREC_RUN_INTERPRETER)
-			PC = lightrec_run_interpreter(lightrec_state,PC);
 
 		timestamp = lightrec_current_cycle_count(
 				lightrec_state);
@@ -3944,14 +3874,7 @@ void PS_CPU::lightrec_plugin_clear(u32 addr, u32 size)
 
 void PS_CPU::lightrec_plugin_shutdown(void)
 {
-	log_cb(RETRO_LOG_INFO,"Lightrec memory usage: %u KiB, average IPI: %.2f\n",
-		lightrec_get_total_mem_usage()/1024,
-		lightrec_get_average_ipi());
 	lightrec_destroy(lightrec_state);
 }
 
-#endif
-
-#if NOT_LIBRETRO
-}
 #endif
