@@ -20,6 +20,9 @@
 #include <lightning.h>
 #include <lightning/jit_private.h>
 #include <sys/mman.h>
+#if defined(__MINGW32__)
+#define mprotect _mprotect
+#endif
 #if defined(__sgi)
 #  include <fcntl.h>
 #endif
